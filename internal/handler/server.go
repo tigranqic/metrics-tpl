@@ -8,16 +8,26 @@ import (
 )
 
 type Handler struct {
-	store *repository.MemStorage
+	store repository.Storage
 }
 
-func NewHandler(store *repository.MemStorage) *Handler {
+func NewHandler(store repository.Storage) *Handler {
 	return &Handler{store: store}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/ping" && r.Method == http.MethodGet {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !strings.HasPrefix(r.URL.Path, "/update/") {
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 

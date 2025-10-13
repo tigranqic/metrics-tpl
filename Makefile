@@ -23,7 +23,9 @@ build: build-server build-agent
 test:
 	$(METRICSTEST_BIN) -test.v -test.run=^TestIteration$(ITERATION)$$ \
 		-agent-binary-path=$(AGENT_BIN) \
-		-binary-path=$(SERVER_BIN)
+		-binary-path=$(SERVER_BIN) \
+		$(if $(SOURCE_PATH),-source-path=$(SOURCE_PATH))
+
 
 clean:
 	rm -f $(SERVER_BIN) $(AGENT_BIN)
