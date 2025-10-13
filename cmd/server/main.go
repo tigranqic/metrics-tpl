@@ -13,7 +13,8 @@ func main() {
 	h := handler.NewHandler(store)
 
 	log.Println("Server is running on :8080")
-	if err := http.ListenAndServe(":8080", h); err != nil {
+	if err := http.ListenAndServe(":8080", h.Router()); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
+

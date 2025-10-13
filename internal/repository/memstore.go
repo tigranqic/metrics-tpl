@@ -12,6 +12,7 @@ type Storage interface {
 	Update(metricType, name, value string) error
 	GetGauge(name string) (float64, error)
 	GetCounter(name string) (int64, error)
+	GetAll() map[string]*models.Metrics
 }
 
 type MemStorage struct {
@@ -77,4 +78,16 @@ func (s *MemStorage) GetCounter(name string) (int64, error) {
 		return 0, errors.New("counter not found")
 	}
 	return *m.Delta, nil
+}
+
+func (s *MemStorage) GetAll() map[string]*models.Metrics {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make(map[string]*models.Metrics, len(s.metrics))
+	for k, v := range s.metrics {
+		copied := *v
+		result[k] = &copied
+	}
+	return result
 }
