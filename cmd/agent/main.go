@@ -38,8 +38,8 @@ func main() {
 	reportInterval := time.Duration(reportIntervalSec) * time.Second
 	pollInterval := time.Duration(pollIntervalSec) * time.Second
 
-	serverAddrUrl := "http://" + *serverAddr
-	a := agent.NewAgent(serverAddrUrl, pollInterval, reportInterval)
+	serverAddrURL := "http://" + *serverAddr
+	a := agent.NewAgent(serverAddrURL, pollInterval, reportInterval)
 
 	stop := make(chan struct{})
 	go a.Run(stop)
