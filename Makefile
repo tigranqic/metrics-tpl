@@ -24,7 +24,8 @@ test:
 	$(METRICSTEST_BIN) -test.v -test.run=^TestIteration$(ITERATION)$$ \
 		-agent-binary-path=$(AGENT_BIN) \
 		-binary-path=$(SERVER_BIN) \
-		$(if $(SOURCE_PATH),-source-path=$(SOURCE_PATH))
+		$(if $(SOURCE_PATH),-source-path=$(SOURCE_PATH)) \
+		-server-port=${SERVER_PORT}
 
 
 clean:
@@ -47,3 +48,9 @@ help:
 	@echo "  make fmt             - Format code"
 	@echo "  make vet             - Run 'go vet'"
 	@echo "  make lint            - Run golangci-lint (optional)"
+
+run-server:
+	$(SERVER_BIN) -a=localhost:8080
+
+run-agent:
+	$(AGENT_BIN) -a=http://localhost:8080 -r=10 -p=2

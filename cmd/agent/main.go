@@ -1,8 +1,11 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -10,8 +13,33 @@ import (
 )
 
 func main() {
-	serverURL := "http://localhost:8080"
-	a := agent.NewAgent(serverURL, 2*time.Second, 10*time.Second)
+	serverAddr := flag.String("a", "localhost:8080", "HTTP server address")
+	reportIntervalStr := flag.String("r", "10", "Report interval in seconds")
+	pollIntervalStr := flag.String("p", "2", "Poll interval in seconds")
+
+	flag.Parse()
+	if len(flag.Args()) > 0 {
+		fmt.Fprintf(os.Stderr, "Unknown arguments: %v\n", flag.Args())
+		os.Exit(1)
+	}
+
+	reportIntervalSec, err := strconv.Atoi(*reportIntervalStr)
+	if err != nil || reportIntervalSec <= 0 {
+		fmt.Fprintf(os.Stderr, "Invalid report interval: %s\n", *reportIntervalStr)
+		os.Exit(1)
+	}
+
+	pollIntervalSec, err := strconv.Atoi(*pollIntervalStr)
+	if err != nil || pollIntervalSec <= 0 {
+		fmt.Fprintf(os.Stderr, "Invalid poll interval: %s\n", *pollIntervalStr)
+		os.Exit(1)
+	}
+
+	reportInterval := time.Duration(reportIntervalSec) * time.Second
+	pollInterval := time.Duration(pollIntervalSec) * time.Second
+
+	serverAddrUrl := "http://" + *serverAddr
+	a := agent.NewAgent(serverAddrUrl, pollInterval, reportInterval)
 
 	stop := make(chan struct{})
 	go a.Run(stop)
