@@ -1,52 +1,40 @@
 package main
 
 import (
-	"flag"
-	"fmt"
+	"context"
+	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
-	"time"
 
 	"github.com/tigranqic/metrics-tpl/internal/agent"
+	"github.com/tigranqic/metrics-tpl/internal/config"
+	"github.com/tigranqic/metrics-tpl/pkg/logger"
 )
 
 func main() {
-	serverAddr := flag.String("a", "localhost:8080", "HTTP server address")
-	reportIntervalStr := flag.String("r", "10", "Report interval in seconds")
-	pollIntervalStr := flag.String("p", "2", "Poll interval in seconds")
-
-	flag.Parse()
-	if len(flag.Args()) > 0 {
-		fmt.Fprintf(os.Stderr, "Unknown arguments: %v\n", flag.Args())
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
 	}
 
-	reportIntervalSec, err := strconv.Atoi(*reportIntervalStr)
-	if err != nil || reportIntervalSec <= 0 {
-		fmt.Fprintf(os.Stderr, "Invalid report interval: %s\n", *reportIntervalStr)
-		os.Exit(1)
-	}
+	logger.Init(cfg.LogLevel, cfg.LogFormat)
+	slog.Info("starting agent", "server", cfg.ServerAddr)
 
-	pollIntervalSec, err := strconv.Atoi(*pollIntervalStr)
-	if err != nil || pollIntervalSec <= 0 {
-		fmt.Fprintf(os.Stderr, "Invalid poll interval: %s\n", *pollIntervalStr)
-		os.Exit(1)
-	}
+	a := agent.NewAgent(cfg.ServerAddr, cfg.PollInterval, cfg.ReportInterval)
 
-	reportInterval := time.Duration(reportIntervalSec) * time.Second
-	pollInterval := time.Duration(pollIntervalSec) * time.Second
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	serverAddrURL := "http://" + *serverAddr
-	a := agent.NewAgent(serverAddrURL, pollInterval, reportInterval)
+	agentStop := make(chan struct{})
 
-	stop := make(chan struct{})
-	go a.Run(stop)
+	go a.Run(agentStop)
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	<-sig
+	<-ctx.Done()
+	slog.Info("received termination signal, shutting down")
 
-	close(stop)
+	close(agentStop)
+
+	slog.Info("agent stopped gracefully")
 }

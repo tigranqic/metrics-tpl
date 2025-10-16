@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -85,7 +86,7 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("error closing response body: %v\n", err)
+			slog.Warn("error closing response body", "error", err)
 		}
 	}()
 	if resp.StatusCode != http.StatusOK {
@@ -105,7 +106,7 @@ func waitForServer(url string, timeout time.Duration) error {
 		if err == nil && resp.StatusCode == http.StatusOK {
 			defer func() {
 				if err := resp.Body.Close(); err != nil {
-					fmt.Printf("error closing response body: %v\n", err)
+					slog.Warn("error closing response body", "error", err)
 				}
 			}()
 			return nil
@@ -113,18 +114,21 @@ func waitForServer(url string, timeout time.Duration) error {
 		if resp != nil {
 			defer func() {
 				if err := resp.Body.Close(); err != nil {
-					fmt.Printf("error closing response body: %v\n", err)
+					slog.Warn("error closing response body", "error", err)
 				}
 			}()
 		}
+		slog.Debug("waiting for server", "url", url)
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("server %s not responding within %s", url, timeout)
 }
 
 func (a *Agent) Run(stop <-chan struct{}) {
+	slog.Info("starting agent loop", "server", a.ServerURL)
+
 	if err := waitForServer(a.ServerURL, 10*time.Second); err != nil {
-		fmt.Println("Ошибка: сервер не доступен:", err)
+		slog.Error("server not available", "url", a.ServerURL, "error", err)
 		return
 	}
 
@@ -139,8 +143,11 @@ func (a *Agent) Run(stop <-chan struct{}) {
 	for {
 		select {
 		case <-pollTicker.C:
+			slog.Debug("collecting metrics")
 			a.collectMetrics()
+
 		case <-reportTicker.C:
+			slog.Debug("sending metrics batch", "count", len(a.metrics))
 			for name, val := range a.metrics {
 				var metricType string
 				if name == "NumForcedGC" || name == "NumGC" || name == "PollCount" {
@@ -149,11 +156,12 @@ func (a *Agent) Run(stop <-chan struct{}) {
 					metricType = "gauge"
 				}
 				if err := a.sendMetric(metricType, name, val); err != nil {
-					fmt.Printf("error sending metric %s: %v\n", name, err)
+					slog.Error("failed to send metric", "name", name, "error", err)
 				}
 			}
+
 		case <-stop:
-			fmt.Println("Agent stopped")
+			slog.Info("agent stopped gracefully")
 			return
 		}
 	}
