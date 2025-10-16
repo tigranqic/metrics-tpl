@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"time"
@@ -69,8 +70,11 @@ func (a *Agent) collectMetrics() {
 }
 
 func (a *Agent) sendMetric(metricType, name, value string) error {
-	url := fmt.Sprintf("%s/update/%s/%s/%s", a.ServerURL, metricType, name, value)
-	req, err := http.NewRequest(http.MethodPost, url, nil)
+	fullURL, err := url.JoinPath(a.ServerURL, "update", metricType, name, value)
+	if err != nil {
+		return fmt.Errorf("failed to build URL: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, fullURL, nil)
 	if err != nil {
 		return err
 	}
