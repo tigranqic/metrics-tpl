@@ -16,8 +16,9 @@ type Agent struct {
 	PollInterval   time.Duration
 	ReportInterval time.Duration
 
-	pollCount int64
-	client    *http.Client
+	pollCount             int64
+	lastReportedPollCount int64
+	client                *http.Client
 
 	metrics map[string]string
 }
@@ -66,7 +67,8 @@ func (a *Agent) collectMetrics() {
 
 	// Special metrics
 	a.pollCount++
-	a.metrics["PollCount"] = strconv.FormatInt(a.pollCount, 10)
+	delta := a.pollCount - a.lastReportedPollCount
+	a.metrics["PollCount"] = strconv.FormatInt(delta, 10)
 	a.metrics["RandomValue"] = strconv.FormatFloat(rand.Float64()*1000, 'f', 3, 64)
 }
 
@@ -77,12 +79,12 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 	}
 	req, err := http.NewRequest(http.MethodPost, fullURL, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create HTTP request for %q: %w", fullURL, err)
 	}
 	req.Header.Set("Content-Type", "text/plain")
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to send request to %q: %w", fullURL, err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
@@ -159,6 +161,7 @@ func (a *Agent) Run(stop <-chan struct{}) {
 					slog.Error("failed to send metric", "name", name, "error", err)
 				}
 			}
+			a.lastReportedPollCount = a.pollCount
 
 		case <-stop:
 			slog.Info("agent stopped gracefully")

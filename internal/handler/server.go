@@ -1,9 +1,9 @@
 package handler
 
 import (
+	"html/template"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/tigranqic/metrics-tpl/internal/repository"
 
@@ -62,7 +62,7 @@ func (h *Handler) updateMetricHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.Update(metricType, name, value); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -100,27 +100,57 @@ func (h *Handler) getMetricValueHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) listMetricsHandler(w http.ResponseWriter, r *http.Request) {
-	metrics := h.store.GetAll()
+	type Metric struct {
+		ID    string
+		MType string
+		Value string
+	}
 
-	w.Header().Set("Content-Type", "text/html")
-	w.WriteHeader(http.StatusOK)
+	all := h.store.GetAll()
+	var metrics []Metric
 
-	builder := strings.Builder{}
-	builder.WriteString("<html><body><h1>Metrics</h1><ul>")
-
-	for _, m := range metrics {
+	for _, m := range all {
 		switch m.MType {
 		case "gauge":
 			if m.Value != nil {
-				builder.WriteString("<li>" + m.ID + ": " + strconv.FormatFloat(*m.Value, 'f', -1, 64) + "</li>")
+				metrics = append(metrics, Metric{
+					ID:    m.ID,
+					MType: m.MType,
+					Value: strconv.FormatFloat(*m.Value, 'f', -1, 64),
+				})
 			}
 		case "counter":
 			if m.Delta != nil {
-				builder.WriteString("<li>" + m.ID + ": " + strconv.FormatInt(*m.Delta, 10) + "</li>")
+				metrics = append(metrics, Metric{
+					ID:    m.ID,
+					MType: m.MType,
+					Value: strconv.FormatInt(*m.Delta, 10),
+				})
 			}
 		}
 	}
 
-	builder.WriteString("</ul></body></html>")
-	_, _ = w.Write([]byte(builder.String()))
+	tmpl := `
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Metrics</title></head>
+<body>
+	<h1>Metrics</h1>
+	<ul>
+		{{range .}}
+			<li>{{.ID}} ({{.MType}}): {{.Value}}</li>
+		{{else}}
+			<li>No metrics found</li>
+		{{end}}
+	</ul>
+</body>
+</html>
+`
+	t := template.Must(template.New("metrics").Parse(tmpl))
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	if err := t.Execute(w, metrics); err != nil {
+		http.Error(w, "failed to render template", http.StatusInternalServerError)
+	}
 }
