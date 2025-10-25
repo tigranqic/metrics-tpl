@@ -6,19 +6,20 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/tigranqic/metrics-tpl/internal/config"
 	"github.com/tigranqic/metrics-tpl/internal/handler"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 )
 
 func main() {
-	addr := flag.String("a", "localhost:8080", "HTTP server address")
-	logLevel := flag.String("log-level", "info", "Log level: debug, info, warn, error")
-	logFormat := flag.String("log-format", "text", "Log format: text or json")
+	cfg, err := config.Load(false)
+	if err != nil {
+		slog.Error("failed to load server config", "err", err)
+		os.Exit(1)
+	}
 
-	flag.Parse()
-
-	logger.Init(*logLevel, *logFormat)
+	logger.Init(cfg.LogLevel, cfg.LogFormat)
 
 	if len(flag.Args()) > 0 {
 		slog.Error("unknown arguments", "args", flag.Args())
@@ -28,9 +29,9 @@ func main() {
 	store := repository.NewMemStorage()
 	h := handler.NewHandler(store)
 
-	slog.Info("starting HTTP server", "address", *addr)
+	slog.Info("starting HTTP server", "address", cfg.ServerAddr)
 
-	if err := http.ListenAndServe(*addr, h.Router()); err != nil {
+	if err := http.ListenAndServe(cfg.ServerAddr, h.Router()); err != nil {
 		slog.Error("server stopped with error", "err", err)
 		os.Exit(1)
 	}

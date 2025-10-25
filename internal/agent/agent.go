@@ -73,10 +73,13 @@ func (a *Agent) collectMetrics() {
 }
 
 func (a *Agent) sendMetric(metricType, name, value string) error {
+	slog.Info("url from iter test", "url", a.ServerURL)
 	fullURL, err := url.JoinPath(a.ServerURL, "update", metricType, name, value)
 	if err != nil {
 		return fmt.Errorf("failed to build URL: %w", err)
 	}
+
+	slog.Info(fullURL, "full url" , fullURL)
 	req, err := http.NewRequest(http.MethodPost, fullURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request for %q: %w", fullURL, err)
@@ -102,7 +105,7 @@ func waitForServer(url string, timeout time.Duration) error {
 	client := &http.Client{
 		Timeout: 2 * time.Second,
 	}
-
+	slog.Info("waitf or service url", url, url)
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(url + "/ping")
 		if err == nil && resp.StatusCode == http.StatusOK {
