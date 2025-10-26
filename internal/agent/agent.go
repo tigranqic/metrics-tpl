@@ -79,7 +79,7 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 		return fmt.Errorf("failed to build URL: %w", err)
 	}
 
-	slog.Info(fullURL, "full url" , fullURL)
+	slog.Info(fullURL, "full url", fullURL)
 	req, err := http.NewRequest(http.MethodPost, fullURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request for %q: %w", fullURL, err)

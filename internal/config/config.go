@@ -19,11 +19,11 @@ type Config struct {
 }
 
 const (
-    DefaultLogLevel       = "info"
-    DefaultLogFormat      = "json"
-    DefaultServerAddr     = "localhost:8080"
-    DefaultReportInterval = 10
-    DefaultPollInterval   = 2
+	DefaultLogLevel       = "info"
+	DefaultLogFormat      = "json"
+	DefaultServerAddr     = "localhost:8080"
+	DefaultReportInterval = 10
+	DefaultPollInterval   = 2
 )
 
 func getenvInt(key string, def int) (int, bool) {
