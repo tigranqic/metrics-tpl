@@ -3,8 +3,11 @@ package agent
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/tigranqic/metrics-tpl/pkg/logger"
 )
 
 func TestCollectMetrics(t *testing.T) {
@@ -45,4 +48,10 @@ func TestSendMetric(t *testing.T) {
 	if !strings.HasPrefix(gotPath, "/update/gauge/Alloc/123.45") {
 		t.Errorf("unexpected request path: %s", gotPath)
 	}
+}
+
+func TestMain(m *testing.M) {
+	logger.Init("debug", "json")
+	code := m.Run()
+	os.Exit(code)
 }

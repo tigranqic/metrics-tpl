@@ -1,40 +1,50 @@
 package logger
 
 import (
-	"log/slog"
-	"os"
 	"strings"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
+
+var log *zap.Logger
 
 func Init(levelStr, formatStr string) {
 	level := parseLevel(levelStr)
 	format := strings.ToLower(strings.TrimSpace(formatStr))
 
-	var handler slog.Handler
+	var cfg zap.Config
 
 	switch format {
 	case "json":
-		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+		cfg = zap.NewProductionConfig()
 	default:
-		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+		cfg = zap.NewDevelopmentConfig()
 	}
 
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
+	cfg.Level = zap.NewAtomicLevelAt(level)
 
-	slog.Info("logger initialized", "level", level.String(), "format", formatOrDefault(format))
+	var err error
+	log, err = cfg.Build()
+	if err != nil {
+		panic(err)
+	}
+
+	log.Info("logger initialized",
+		zap.String("level", level.String()),
+		zap.String("format", formatOrDefault(format)))
 }
 
-func parseLevel(levelStr string) slog.Level {
+func parseLevel(levelStr string) zapcore.Level {
 	switch strings.ToLower(strings.TrimSpace(levelStr)) {
 	case "debug":
-		return slog.LevelDebug
+		return zapcore.DebugLevel
 	case "warn", "warning":
-		return slog.LevelWarn
+		return zapcore.WarnLevel
 	case "error":
-		return slog.LevelError
+		return zapcore.ErrorLevel
 	default:
-		return slog.LevelInfo
+		return zapcore.InfoLevel
 	}
 }
 
@@ -43,4 +53,11 @@ func formatOrDefault(format string) string {
 		return "text"
 	}
 	return format
+}
+
+func Get() *zap.Logger {
+	if log == nil {
+		return zap.NewNop()
+	}
+	return log
 }

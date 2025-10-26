@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,17 +9,20 @@ import (
 	"github.com/tigranqic/metrics-tpl/internal/agent"
 	"github.com/tigranqic/metrics-tpl/internal/config"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
+	"go.uber.org/zap"
 )
 
 func main() {
 	cfg, err := config.Load(true)
 	if err != nil {
-		slog.Error("failed to load config", "err", err)
+		println("failed to load config:", err.Error())
 		os.Exit(1)
 	}
 
 	logger.Init(cfg.LogLevel, cfg.LogFormat)
-	slog.Info("starting agent", "server", cfg.ServerAddr)
+	log := logger.Get()
+
+	log.Info("starting agent", zap.String("server", cfg.ServerAddr))
 
 	a := agent.NewAgent(cfg.ServerAddr, cfg.PollInterval, cfg.ReportInterval)
 
@@ -32,9 +34,9 @@ func main() {
 	go a.Run(agentStop)
 
 	<-ctx.Done()
-	slog.Info("received termination signal, shutting down")
+	log.Info("received termination signal, shutting down")
 
 	close(agentStop)
 
-	slog.Info("agent stopped gracefully")
+	log.Info("agent stopped gracefully")
 }
