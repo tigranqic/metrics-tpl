@@ -1,14 +1,16 @@
 package agent
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"runtime"
 	"strconv"
 	"time"
 
+	models "github.com/tigranqic/metrics-tpl/internal/model"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 	"go.uber.org/zap"
 )
@@ -77,18 +79,37 @@ func (a *Agent) collectMetrics() {
 }
 
 func (a *Agent) sendMetric(metricType, name, value string) error {
-	fullURL, err := url.JoinPath(a.ServerURL, "update", metricType, name, value)
-	if err != nil {
-		return fmt.Errorf("failed to build URL: %w", err)
+	fullURL := a.ServerURL + "/update/"
+
+	var m models.Metrics
+	m.ID = name
+	m.MType = metricType
+
+	switch metricType {
+	case "gauge":
+		v, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return err
+		}
+		m.Value = &v
+	case "counter":
+		v, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return err
+		}
+		m.Delta = &v
 	}
 
-	a.log.Debug("sending metric", zap.String("url", fullURL), zap.String("name", name), zap.String("value", value))
-
-	req, err := http.NewRequest(http.MethodPost, fullURL, nil)
+	body, err := json.Marshal(m)
 	if err != nil {
-		return fmt.Errorf("failed to create HTTP request for %q: %w", fullURL, err)
+		return fmt.Errorf("failed to marshal metric: %w", err)
 	}
-	req.Header.Set("Content-Type", "text/plain")
+
+	req, err := http.NewRequest(http.MethodPost, fullURL, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
 
 	start := time.Now()
 	resp, err := a.client.Do(req)
@@ -98,7 +119,9 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 		a.log.Error("failed to send request", zap.String("url", fullURL), zap.Error(err), zap.Duration("duration", duration))
 		return fmt.Errorf("failed to send request to %q: %w", fullURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	a.log.Info("metric sent",
 		zap.String("url", fullURL),
@@ -122,12 +145,12 @@ func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(baseURL + "/ping")
 		if err == nil && resp.StatusCode == http.StatusOK {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			log.Info("server is ready", zap.String("url", baseURL))
 			return nil
 		}
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -161,7 +184,7 @@ func (a *Agent) Run(stop <-chan struct{}) {
 			a.log.Debug("sending metrics batch", zap.Int("count", len(a.metrics)))
 			for name, val := range a.metrics {
 				var metricType string
-				if name == "NumForcedGC" || name == "NumGC" || name == "PollCount" {
+				if name == "PollCount" {
 					metricType = "counter"
 				} else {
 					metricType = "gauge"

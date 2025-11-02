@@ -114,6 +114,82 @@ func TestHandler_Router(t *testing.T) {
 	}
 }
 
+func TestHandler_JSONEndpoints(t *testing.T) {
+	store := repository.NewMemStorage()
+	h := NewHandler(store)
+	router := h.Router()
+
+	gaugeBody := `{"id":"Alloc","type":"gauge","value":123.45}`
+	req := httptest.NewRequest(http.MethodPost, "/update/", strings.NewReader(gaugeBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for /update gauge; got %d", w.Code)
+	}
+	if val, err := store.GetGauge("Alloc"); err != nil || val != 123.45 {
+		t.Fatalf("expected stored gauge 123.45; got %v, err %v", val, err)
+	}
+
+	counterBody := `{"id":"PollCount","type":"counter","delta":5}`
+	req = httptest.NewRequest(http.MethodPost, "/update/", strings.NewReader(counterBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for /update counter; got %d", w.Code)
+	}
+	if val, err := store.GetCounter("PollCount"); err != nil || val != 5 {
+		t.Fatalf("expected stored counter 5; got %v, err %v", val, err)
+	}
+
+	valueReq := `{"id":"Alloc","type":"gauge"}`
+	req = httptest.NewRequest(http.MethodPost, "/value/", strings.NewReader(valueReq))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for /value gauge; got %d", w.Code)
+	}
+	body := w.Body.String()
+	expectedGaugeParts := []string{`"id":"Alloc"`, `"type":"gauge"`, `"value":123.45`}
+	for _, p := range expectedGaugeParts {
+		if !strings.Contains(body, p) {
+			t.Errorf("expected response body to contain %q, got %s", p, body)
+		}
+	}
+
+	valueReq = `{"id":"PollCount","type":"counter"}`
+	req = httptest.NewRequest(http.MethodPost, "/value/", strings.NewReader(valueReq))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for /value counter; got %d", w.Code)
+	}
+	body = w.Body.String()
+	expectedCounterParts := []string{`"id":"PollCount"`, `"type":"counter"`, `"delta":5`}
+	for _, p := range expectedCounterParts {
+		if !strings.Contains(body, p) {
+			t.Errorf("expected response body to contain %q, got %s", p, body)
+		}
+	}
+
+	valueReq = `{"id":"Unknown","type":"gauge"}`
+	req = httptest.NewRequest(http.MethodPost, "/value/", strings.NewReader(valueReq))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404 for unknown metric; got %d", w.Code)
+	}
+}
+
 func containsAll(s string, substrings ...string) bool {
 	for _, sub := range substrings {
 		if !strings.Contains(s, sub) {
