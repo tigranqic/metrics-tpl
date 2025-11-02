@@ -28,9 +28,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	store := repository.NewMemStorage()
-	h := handler.NewHandler(store)
+	store := repository.NewMemStorage(cfg.FileStoragePath, cfg.StoreInterval)
 
+	if cfg.Restore {
+		if err := store.LoadFromFile(cfg.FileStoragePath); err != nil {
+			log.Error("failed to restore metrics", zap.Error(err))
+		} else {
+			log.Info("metrics restored successfully", zap.String("file", cfg.FileStoragePath))
+		}
+	}
+
+	stopCh := make(chan struct{})
+	if cfg.StoreInterval > 0 {
+		store.StartAutoSave(cfg.FileStoragePath, cfg.StoreInterval, stopCh)
+		defer close(stopCh)
+	}
+
+	h := handler.NewHandler(store)
 	loggedHandler := middleware.LoggingMiddleware(log)(h.Router())
 
 	log.Info("starting HTTP server", zap.String("address", cfg.ServerAddr))

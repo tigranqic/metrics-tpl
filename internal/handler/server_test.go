@@ -10,7 +10,7 @@ import (
 )
 
 func TestHandler_Router(t *testing.T) {
-	store := repository.NewMemStorage()
+	store := repository.NewMemStorage("", 0)
 	h := NewHandler(store)
 	router := h.Router()
 
@@ -115,7 +115,7 @@ func TestHandler_Router(t *testing.T) {
 }
 
 func TestHandler_JSONEndpoints(t *testing.T) {
-	store := repository.NewMemStorage()
+	store := repository.NewMemStorage("", 0)
 	h := NewHandler(store)
 	router := h.Router()
 
