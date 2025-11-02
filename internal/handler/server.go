@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/tigranqic/metrics-tpl/internal/middleware"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
 
 	"encoding/json"
@@ -25,6 +26,9 @@ func NewHandler(store repository.Storage) *Handler {
 
 func (h *Handler) Router() http.Handler {
 	r := chi.NewRouter()
+
+	r.Use(middleware.GzipDecompress)
+	r.Use(middleware.GzipCompress)
 
 	r.Get("/", h.listMetricsHandler)
 	r.Get("/ping", h.pingHandler)

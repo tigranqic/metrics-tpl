@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -105,11 +106,22 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 		return fmt.Errorf("failed to marshal metric: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, fullURL, bytes.NewBuffer(body))
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(body); err != nil {
+		return fmt.Errorf("gzip write failed: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("gzip close failed: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, fullURL, &buf)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
 
 	start := time.Now()
 	resp, err := a.client.Do(req)

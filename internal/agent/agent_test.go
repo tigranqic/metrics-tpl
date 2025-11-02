@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -32,17 +33,35 @@ func TestSendMetric(t *testing.T) {
 	var gotMethod string
 	var gotPath string
 
+	// сервер распаковывает gzip, если Content-Encoding: gzip
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
 		gotHeader = r.Header.Get("Content-Type")
 
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read body: %v", err)
-		}
-		gotBody = string(body)
+		var bodyBytes []byte
+		var err error
 
+		if r.Header.Get("Content-Encoding") == "gzip" {
+			gz, err := gzip.NewReader(r.Body)
+			if err != nil {
+				t.Fatalf("failed to create gzip reader: %v", err)
+			}
+			defer func() {
+				_ = gz.Close()
+			}()
+			bodyBytes, err = io.ReadAll(gz)
+			if err != nil {
+				t.Fatalf("failed to read gzip body: %v", err)
+			}
+		} else {
+			bodyBytes, err = io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("failed to read body: %v", err)
+			}
+		}
+
+		gotBody = string(bodyBytes)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
