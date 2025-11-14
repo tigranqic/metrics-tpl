@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,7 +16,7 @@ import (
 func main() {
 	cfg, err := config.Load(true)
 	if err != nil {
-		println("failed to load config:", err.Error())
+		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
 	}
 
