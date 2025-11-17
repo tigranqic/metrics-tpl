@@ -25,7 +25,8 @@ test:
 		-agent-binary-path=$(AGENT_BIN) \
 		-binary-path=$(SERVER_BIN) \
 		$(if $(SOURCE_PATH),-source-path=$(SOURCE_PATH)) \
-		-server-port=${SERVER_PORT}
+		-server-port=${SERVER_PORT} \
+		-file-storage-path=${FILE_STORAGE_PATH}
 
 
 clean:

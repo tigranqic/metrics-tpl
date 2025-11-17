@@ -1,14 +1,24 @@
 package agent
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
-	"log/slog"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"runtime"
 	"strconv"
 	"time"
+
+	models "github.com/tigranqic/metrics-tpl/internal/model"
+	"github.com/tigranqic/metrics-tpl/pkg/logger"
+	"go.uber.org/zap"
+)
+
+const (
+    MetricTypeGauge   = "gauge"
+    MetricTypeCounter = "counter"
 )
 
 type Agent struct {
@@ -21,6 +31,7 @@ type Agent struct {
 	client                *http.Client
 
 	metrics map[string]string
+	log     *zap.Logger
 }
 
 func NewAgent(serverURL string, pollInterval, reportInterval time.Duration) *Agent {
@@ -30,6 +41,7 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration) *Age
 		ReportInterval: reportInterval,
 		client:         &http.Client{Timeout: 5 * time.Second},
 		metrics:        make(map[string]string),
+		log:            logger.Get(),
 	}
 }
 
@@ -73,64 +85,101 @@ func (a *Agent) collectMetrics() {
 }
 
 func (a *Agent) sendMetric(metricType, name, value string) error {
-	fullURL, err := url.JoinPath(a.ServerURL, "update", metricType, name, value)
-	if err != nil {
-		return fmt.Errorf("failed to build URL: %w", err)
+	fullURL := a.ServerURL + "/update/"
+
+	var m models.Metrics
+	m.ID = name
+	m.MType = metricType
+
+	switch metricType {
+	case MetricTypeGauge:
+		v, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return err
+		}
+		m.Value = &v
+	case MetricTypeCounter:
+		v, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return err
+		}
+		m.Delta = &v
 	}
-	req, err := http.NewRequest(http.MethodPost, fullURL, nil)
+
+	body, err := json.Marshal(m)
 	if err != nil {
-		return fmt.Errorf("failed to create HTTP request for %q: %w", fullURL, err)
+		return fmt.Errorf("failed to marshal metric: %w", err)
 	}
-	req.Header.Set("Content-Type", "text/plain")
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(body); err != nil {
+		return fmt.Errorf("gzip write failed: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("gzip close failed: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, fullURL, &buf)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	start := time.Now()
 	resp, err := a.client.Do(req)
+	duration := time.Since(start)
+
 	if err != nil {
+		a.log.Error("failed to send request", zap.String("url", fullURL), zap.Error(err), zap.Duration("duration", duration))
 		return fmt.Errorf("failed to send request to %q: %w", fullURL, err)
 	}
 	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			slog.Warn("error closing response body", "error", err)
-		}
+		_ = resp.Body.Close()
 	}()
+
+	a.log.Info("metric sent",
+		zap.String("url", fullURL),
+		zap.Int("status", resp.StatusCode),
+		zap.Duration("duration", duration),
+	)
+
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned %s", resp.Status)
 	}
+
 	return nil
 }
 
-func waitForServer(url string, timeout time.Duration) error {
+func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error {
 	deadline := time.Now().Add(timeout)
-	client := &http.Client{
-		Timeout: 2 * time.Second,
-	}
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	log.Info("waiting for server", zap.String("url", baseURL), zap.Duration("timeout", timeout))
 
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(url + "/ping")
+		resp, err := client.Get(baseURL + "/ping")
 		if err == nil && resp.StatusCode == http.StatusOK {
-			defer func() {
-				if err := resp.Body.Close(); err != nil {
-					slog.Warn("error closing response body", "error", err)
-				}
-			}()
+			_ = resp.Body.Close()
+			log.Info("server is ready", zap.String("url", baseURL))
 			return nil
 		}
 		if resp != nil {
-			defer func() {
-				if err := resp.Body.Close(); err != nil {
-					slog.Warn("error closing response body", "error", err)
-				}
-			}()
+			_ = resp.Body.Close()
 		}
-		slog.Debug("waiting for server", "url", url)
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Errorf("server %s not responding within %s", url, timeout)
+
+	return fmt.Errorf("server %s not responding within %s", baseURL, timeout)
 }
 
 func (a *Agent) Run(stop <-chan struct{}) {
-	slog.Info("starting agent loop", "server", a.ServerURL)
+	a.log.Info("starting agent loop", zap.String("server", a.ServerURL))
 
-	if err := waitForServer(a.ServerURL, 10*time.Second); err != nil {
-		slog.Error("server not available", "url", a.ServerURL, "error", err)
+	if err := waitForServer(a.ServerURL, 10*time.Second, a.log); err != nil {
+		a.log.Error("server not available", zap.String("url", a.ServerURL), zap.Error(err))
 		return
 	}
 
@@ -145,26 +194,26 @@ func (a *Agent) Run(stop <-chan struct{}) {
 	for {
 		select {
 		case <-pollTicker.C:
-			slog.Debug("collecting metrics")
+			a.log.Debug("collecting metrics")
 			a.collectMetrics()
 
 		case <-reportTicker.C:
-			slog.Debug("sending metrics batch", "count", len(a.metrics))
+			a.log.Debug("sending metrics batch", zap.Int("count", len(a.metrics)))
 			for name, val := range a.metrics {
 				var metricType string
-				if name == "NumForcedGC" || name == "NumGC" || name == "PollCount" {
+				if name == "PollCount" {
 					metricType = "counter"
 				} else {
 					metricType = "gauge"
 				}
 				if err := a.sendMetric(metricType, name, val); err != nil {
-					slog.Error("failed to send metric", "name", name, "error", err)
+					a.log.Error("failed to send metric", zap.String("name", name), zap.Error(err))
 				}
 			}
 			a.lastReportedPollCount = a.pollCount
 
 		case <-stop:
-			slog.Info("agent stopped gracefully")
+			a.log.Info("agent stopped gracefully")
 			return
 		}
 	}

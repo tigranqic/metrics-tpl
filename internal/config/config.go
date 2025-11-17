@@ -3,6 +3,9 @@ package config
 import (
 	"errors"
 	"flag"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -12,30 +15,128 @@ type Config struct {
 	ServerAddr     string
 	ReportInterval time.Duration
 	PollInterval   time.Duration
+	IsAgent        bool
+	StoreInterval   time.Duration
+	FileStoragePath string
+	Restore         bool
 }
 
-func Load() (*Config, error) {
-	logLevel := flag.String("log-level", "info", "Log level: debug, info, warn, error")
-	logFormat := flag.String("log-format", "text", "Log format: text or json")
+const (
+	DefaultLogLevel       = "info"
+	DefaultLogFormat      = "json"
+	DefaultServerAddr     = "localhost:8080"
+	DefaultReportInterval = 10
+	DefaultPollInterval   = 2
+	DefaultStoreInterval   = 15
+	DefaultFileStoragePath = "metrics.json"
+	DefaultRestore         = false
+)
 
-	serverAddr := flag.String("a", "localhost:8080", "HTTP server address")
-	reportInterval := flag.Int("r", 10, "Report interval in seconds")
-	pollInterval := flag.Int("p", 2, "Poll interval in seconds")
+func getenvInt(key string, def int) (int, bool) {
+	if val := os.Getenv(key); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			return n, true
+		}
+	}
+	return def, false
+}
+
+func getenvString(key string, def string) (string, bool) {
+	if val := os.Getenv(key); val != "" {
+		return val, true
+	}
+	return def, false
+}
+
+func getenvBool(key string, def bool) (bool, bool) {
+	if val := os.Getenv(key); val != "" {
+		v := strings.ToLower(val)
+		if v == "true" || v == "1" {
+			return true, true
+		}
+		if v == "false" || v == "0" {
+			return false, true
+		}
+	}
+	return def, false
+}
+
+func Load(isAgent bool) (*Config, error) {
+	chooseString := func(envVal string, envSet bool, flagVal string, def string) string {
+		if envSet {
+			return envVal
+		} else if flagVal != "" && flagVal != def {
+			return flagVal
+		}
+		return def
+	}
+
+	chooseInt := func(envVal int, envSet bool, flagVal int, def int) int {
+		if envSet {
+			return envVal
+		} else if flagVal != def {
+			return flagVal
+		}
+		return def
+	}
+
+	chooseBool := func(envVal bool, envSet bool, flagVal bool, def bool) bool {
+		if envSet {
+			return envVal
+		} else if flagVal != def {
+			return flagVal
+		}
+		return def
+	}
+
+	envAddr, envAddrSet := getenvString("ADDRESS", DefaultServerAddr)
+	envReport, envReportSet := getenvInt("REPORT_INTERVAL", DefaultReportInterval)
+	envPoll, envPollSet := getenvInt("POLL_INTERVAL", DefaultPollInterval)
+	envStore, envStoreSet := getenvInt("STORE_INTERVAL", DefaultStoreInterval)
+	envFile, envFileSet := getenvString("FILE_STORAGE_PATH", DefaultFileStoragePath)
+	envRestore, envRestoreSet := getenvBool("RESTORE", DefaultRestore)
+
+	logLevel := flag.String("log-level", DefaultLogLevel, "Log level: debug, info, warn, error")
+	logFormat := flag.String("log-format", DefaultLogFormat, "Log format: text or json")
+	serverAddrFlag := flag.String("a", DefaultServerAddr, "HTTP server address")
+	reportFlag := flag.Int("r", DefaultReportInterval, "Report interval in seconds")
+	pollFlag := flag.Int("p", DefaultPollInterval, "Poll interval in seconds")
+	storeFlag := flag.Int("i", DefaultStoreInterval, "Interval in seconds to store metrics (0 = sync)")
+	fileFlag := flag.String("f", DefaultFileStoragePath, "File path for metrics storage")
+	restoreFlag := flag.Bool("R", DefaultRestore, "Restore metrics from file on startup")
 
 	flag.Parse()
 
-	if *reportInterval <= 0 {
+	serverAddr := chooseString(envAddr, envAddrSet, *serverAddrFlag, DefaultServerAddr)
+	reportInterval := chooseInt(envReport, envReportSet, *reportFlag, DefaultReportInterval)
+	pollInterval := chooseInt(envPoll, envPollSet, *pollFlag, DefaultPollInterval)
+	storeInterval := chooseInt(envStore, envStoreSet, *storeFlag, DefaultStoreInterval)
+	fileStorage := chooseString(envFile, envFileSet, *fileFlag, DefaultFileStoragePath)
+	restore := chooseBool(envRestore, envRestoreSet, *restoreFlag, DefaultRestore)
+
+	if reportInterval <= 0 {
 		return nil, errors.New("report interval must be greater than zero")
 	}
-	if *pollInterval <= 0 {
+	if pollInterval <= 0 {
 		return nil, errors.New("poll interval must be greater than zero")
 	}
 
+	if isAgent && !strings.HasPrefix(serverAddr, "http://") && !strings.HasPrefix(serverAddr, "https://") {
+		serverAddr = "http://" + serverAddr
+	}
+	if !isAgent {
+		serverAddr = strings.TrimPrefix(serverAddr, "http://")
+		serverAddr = strings.TrimPrefix(serverAddr, "https://")
+	}
+
 	return &Config{
-		LogLevel:       *logLevel,
-		LogFormat:      *logFormat,
-		ServerAddr:     "http://" + *serverAddr,
-		ReportInterval: time.Duration(*reportInterval) * time.Second,
-		PollInterval:   time.Duration(*pollInterval) * time.Second,
+		LogLevel:        *logLevel,
+		LogFormat:       *logFormat,
+		ServerAddr:      serverAddr,
+		ReportInterval:  time.Duration(reportInterval) * time.Second,
+		PollInterval:    time.Duration(pollInterval) * time.Second,
+		StoreInterval:   time.Duration(storeInterval) * time.Second,
+		FileStoragePath: fileStorage,
+		Restore:         restore,
 	}, nil
 }
