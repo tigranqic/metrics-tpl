@@ -16,6 +16,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+    MetricTypeGauge   = "gauge"
+    MetricTypeCounter = "counter"
+)
+
 type Agent struct {
 	ServerURL      string
 	PollInterval   time.Duration
@@ -87,13 +92,13 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 	m.MType = metricType
 
 	switch metricType {
-	case "gauge":
+	case MetricTypeGauge:
 		v, err := strconv.ParseFloat(value, 64)
 		if err != nil {
 			return err
 		}
 		m.Value = &v
-	case "counter":
+	case MetricTypeCounter:
 		v, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return err
