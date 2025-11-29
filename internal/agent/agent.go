@@ -17,8 +17,8 @@ import (
 )
 
 const (
-    MetricTypeGauge   = "gauge"
-    MetricTypeCounter = "counter"
+	MetricTypeGauge   = "gauge"
+	MetricTypeCounter = "counter"
 )
 
 type Agent struct {

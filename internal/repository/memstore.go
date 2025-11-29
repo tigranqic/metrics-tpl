@@ -126,8 +126,9 @@ func (s *MemStorage) SaveToFile(filePath string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-
+	defer func() {
+		_ = file.Close()
+	}()
 	return json.NewEncoder(file).Encode(data)
 }
 
@@ -142,8 +143,9 @@ func (s *MemStorage) LoadFromFile(filePath string) error {
 		}
 		return err
 	}
-	defer file.Close()
-
+	defer func() {
+		_ = file.Close()
+	}()
 	var data []*models.Metrics
 	if err := json.NewDecoder(file).Decode(&data); err != nil {
 		return err

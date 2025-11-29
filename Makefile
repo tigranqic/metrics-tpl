@@ -26,7 +26,8 @@ test:
 		-binary-path=$(SERVER_BIN) \
 		$(if $(SOURCE_PATH),-source-path=$(SOURCE_PATH)) \
 		-server-port=${SERVER_PORT} \
-		-file-storage-path=${FILE_STORAGE_PATH}
+		-file-storage-path=${FILE_STORAGE_PATH} \
+		-database-dsn=${DATABASE_DSN}
 
 
 clean:
@@ -54,4 +55,4 @@ run-server:
 	$(SERVER_BIN) -a=localhost:8080
 
 run-agent:
-	$(AGENT_BIN) -a=http://localhost:8080 -r=10 -p=2
+	$(AGENT_BIN) -a=http://localhost:8080 -R=10 -p=2

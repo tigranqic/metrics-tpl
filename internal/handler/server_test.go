@@ -1,17 +1,26 @@
 package handler
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
+	_ "github.com/lib/pq"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
 )
 
 func TestHandler_Router(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
-	h := NewHandler(store)
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close test DB: %v", err)
+		}
+	}()
+	h := NewHandler(store, db)
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/update/gauge/Alloc/123.45", nil)
@@ -116,7 +125,13 @@ func TestHandler_Router(t *testing.T) {
 
 func TestHandler_JSONEndpoints(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
-	h := NewHandler(store)
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close test DB: %v", err)
+		}
+	}()
+	h := NewHandler(store, db)
 	router := h.Router()
 
 	gaugeBody := `{"id":"Alloc","type":"gauge","value":123.45}`
@@ -197,4 +212,26 @@ func containsAll(s string, substrings ...string) bool {
 		}
 	}
 	return true
+}
+
+func setupTestDB(t *testing.T) *sql.DB {
+	dsn := os.Getenv("TEST_DATABASE_DSN")
+	if dsn == "" {
+		dsn = "postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
+	}
+
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatalf("failed to connect to test DB: %v", err)
+	}
+
+	if err := db.Ping(); err != nil {
+		defer func() {
+			if err := db.Close(); err != nil {
+				t.Fatalf("failed to close test DB: %v", err)
+			}
+		}()
+	}
+
+	return db
 }

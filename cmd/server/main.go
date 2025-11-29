@@ -5,6 +5,10 @@ import (
 	"net/http"
 	"os"
 
+	"database/sql"
+
+	_ "github.com/lib/pq"
+
 	"github.com/tigranqic/metrics-tpl/internal/config"
 	"github.com/tigranqic/metrics-tpl/internal/handler"
 	"github.com/tigranqic/metrics-tpl/internal/middleware"
@@ -28,6 +32,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	db, err := sql.Open("postgres", cfg.DatabaseDSN)
+	if err != nil {
+		log.Error("failed to open DB connection", zap.Error(err))
+		os.Exit(1)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Error("failed to close test DB", zap.Error(err))
+		}
+	}()
+	if err := db.Ping(); err != nil {
+		log.Error("failed to ping DB", zap.Error(err))
+		os.Exit(1)
+	}
+
 	store := repository.NewMemStorage(cfg.FileStoragePath, cfg.StoreInterval)
 
 	if cfg.Restore {
@@ -44,7 +63,7 @@ func main() {
 		defer close(stopCh)
 	}
 
-	h := handler.NewHandler(store)
+	h := handler.NewHandler(store, db)
 	loggedHandler := middleware.LoggingMiddleware(log)(h.Router())
 
 	log.Info("starting HTTP server", zap.String("address", cfg.ServerAddr))

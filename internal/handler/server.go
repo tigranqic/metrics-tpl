@@ -13,15 +13,21 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"database/sql"
+
 	models "github.com/tigranqic/metrics-tpl/internal/model"
 )
 
 type Handler struct {
 	store repository.Storage
+	db    *sql.DB
 }
 
-func NewHandler(store repository.Storage) *Handler {
-	return &Handler{store: store}
+func NewHandler(store repository.Storage, db *sql.DB) *Handler {
+	return &Handler{
+		store: store,
+		db:    db,
+	}
 }
 
 func (h *Handler) Router() http.Handler {
@@ -43,6 +49,11 @@ func (h *Handler) Router() http.Handler {
 }
 
 func (h *Handler) pingHandler(w http.ResponseWriter, r *http.Request) {
+	if err := h.db.Ping(); err != nil {
+		http.Error(w, "DB connection error", http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
