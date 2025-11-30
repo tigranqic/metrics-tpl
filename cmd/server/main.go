@@ -32,19 +32,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	db, err := sql.Open("postgres", cfg.DatabaseDSN)
-	if err != nil {
-		log.Error("failed to open DB connection", zap.Error(err))
-		os.Exit(1)
-	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			log.Error("failed to close test DB", zap.Error(err))
+	var db *sql.DB
+	if cfg.DatabaseDSN != "" {
+		db, err = sql.Open("postgres", cfg.DatabaseDSN)
+		if err != nil {
+			log.Error("failed to open DB connection", zap.Error(err))
+			os.Exit(1)
 		}
-	}()
-	if err := db.Ping(); err != nil {
-		log.Error("failed to ping DB", zap.Error(err))
-		os.Exit(1)
+
+		if err := db.Ping(); err != nil {
+			log.Error("failed to ping DB", zap.Error(err))
+			os.Exit(1)
+		}
+		log.Info("DB connection established")
+	} else {
+		log.Info("no DB configured – running in memory mode")
 	}
 
 	store := repository.NewMemStorage(cfg.FileStoragePath, cfg.StoreInterval)

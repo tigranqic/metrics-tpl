@@ -97,7 +97,7 @@ func Load(isAgent bool) (*Config, error) {
 	envStore, envStoreSet := getenvInt("STORE_INTERVAL", DefaultStoreInterval)
 	envFile, envFileSet := getenvString("FILE_STORAGE_PATH", DefaultFileStoragePath)
 	envRestore, envRestoreSet := getenvBool("RESTORE", DefaultRestore)
-	envDBDSN, envDBDSNSet := getenvString("DATABASE_DSN", DefaultDBDSN)
+	envDBDSN, envDBDSNSet := getenvString("DATABASE_DSN", "")
 
 	logLevel := flag.String("log-level", DefaultLogLevel, "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", DefaultLogFormat, "Log format: text or json")
@@ -107,7 +107,7 @@ func Load(isAgent bool) (*Config, error) {
 	storeFlag := flag.Int("i", DefaultStoreInterval, "Interval in seconds to store metrics (0 = sync)")
 	fileFlag := flag.String("f", DefaultFileStoragePath, "File path for metrics storage")
 	restoreFlag := flag.Bool("r", DefaultRestore, "Restore metrics from file on startup")
-	dbDSNFlag := flag.String("d", DefaultDBDSN, "Database DSN connection string")
+	dbDSNFlag := flag.String("d", "", "Database DSN connection string")
 
 	flag.Parse()
 
@@ -117,7 +117,7 @@ func Load(isAgent bool) (*Config, error) {
 	storeInterval := chooseInt(envStore, envStoreSet, *storeFlag, DefaultStoreInterval)
 	fileStorage := chooseString(envFile, envFileSet, *fileFlag, DefaultFileStoragePath)
 	restore := chooseBool(envRestore, envRestoreSet, *restoreFlag, DefaultRestore)
-	databaseDSN := chooseString(envDBDSN, envDBDSNSet, *dbDSNFlag, DefaultDBDSN)
+	databaseDSN := chooseString(envDBDSN, envDBDSNSet, *dbDSNFlag, "")
 
 	if reportInterval <= 0 {
 		return nil, errors.New("report interval must be greater than zero")
