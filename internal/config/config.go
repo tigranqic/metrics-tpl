@@ -102,11 +102,9 @@ func Load(isAgent bool) (*Config, error) {
 	logLevel := flag.String("log-level", DefaultLogLevel, "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", DefaultLogFormat, "Log format: text or json")
 	serverAddrFlag := flag.String("a", DefaultServerAddr, "HTTP server address")
-	reportFlag := flag.Int("R", DefaultReportInterval, "Report interval in seconds")
 	pollFlag := flag.Int("p", DefaultPollInterval, "Poll interval in seconds")
 	storeFlag := flag.Int("i", DefaultStoreInterval, "Interval in seconds to store metrics (0 = sync)")
 	fileFlag := flag.String("f", DefaultFileStoragePath, "File path for metrics storage")
-	restoreFlag := flag.Bool("r", DefaultRestore, "Restore metrics from file on startup")
 	dbDSNFlag := flag.String("d", "", "Database DSN connection string")
 	var reportFlag *int
 	var restoreFlag *bool
