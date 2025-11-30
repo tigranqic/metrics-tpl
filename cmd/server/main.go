@@ -8,6 +8,7 @@ import (
 	"database/sql"
 
 	_ "github.com/lib/pq"
+	"github.com/pressly/goose"
 
 	"github.com/tigranqic/metrics-tpl/internal/config"
 	"github.com/tigranqic/metrics-tpl/internal/handler"
@@ -33,6 +34,8 @@ func main() {
 	}
 
 	var db *sql.DB
+	var store repository.Storage
+
 	if cfg.DatabaseDSN != "" {
 		db, err = sql.Open("postgres", cfg.DatabaseDSN)
 		if err != nil {
@@ -44,25 +47,40 @@ func main() {
 			log.Error("failed to ping DB", zap.Error(err))
 			os.Exit(1)
 		}
-		log.Info("DB connection established")
-	} else {
-		log.Info("no DB configured – running in memory mode")
-	}
 
-	store := repository.NewMemStorage(cfg.FileStoragePath, cfg.StoreInterval)
-
-	if cfg.Restore {
-		if err := store.LoadFromFile(cfg.FileStoragePath); err != nil {
-			log.Error("failed to restore metrics", zap.Error(err))
-		} else {
-			log.Info("metrics restored successfully", zap.String("file", cfg.FileStoragePath))
+		if err := goose.Up(db, "migrations"); err != nil {
+			log.Error("failed to run migrations", zap.Error(err))
+			os.Exit(1)
 		}
-	}
 
-	stopCh := make(chan struct{})
-	if cfg.StoreInterval > 0 {
-		store.StartAutoSave(cfg.FileStoragePath, cfg.StoreInterval, stopCh)
-		defer close(stopCh)
+		store = repository.NewPostgresStorage(db)
+		log.Info("using PostgreSQL storage")
+	} else {
+		if cfg.FileStoragePath != "" {
+			store = repository.NewMemStorage(cfg.FileStoragePath, cfg.StoreInterval)
+			log.Info("using file storage", zap.String("file", cfg.FileStoragePath))
+			if cfg.Restore {
+				if mem, ok := store.(*repository.MemStorage); ok {
+					if err := mem.LoadFromFile(cfg.FileStoragePath); err != nil {
+						log.Error("failed to restore metrics", zap.Error(err))
+					} else {
+						log.Info("metrics restored successfully", zap.String("file", cfg.FileStoragePath))
+					}
+				}
+			}
+
+			if cfg.StoreInterval > 0 {
+				if mem, ok := store.(*repository.MemStorage); ok {
+					stopCh := make(chan struct{})
+					mem.StartAutoSave(cfg.FileStoragePath, cfg.StoreInterval, stopCh)
+					defer close(stopCh)
+				}
+			}
+
+		} else {
+			store = repository.NewMemStorage("", 0)
+			log.Info("using in-memory storage")
+		}
 	}
 
 	h := handler.NewHandler(store, db)
