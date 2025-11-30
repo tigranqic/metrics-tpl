@@ -160,7 +160,7 @@ func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error
 	log.Info("waiting for server", zap.String("url", baseURL), zap.Duration("timeout", timeout))
 
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(baseURL + "/ping")
+		resp, err := client.Get(baseURL + "/health")
 		if err == nil && resp.StatusCode == http.StatusOK {
 			_ = resp.Body.Close()
 			log.Info("server is ready", zap.String("url", baseURL))

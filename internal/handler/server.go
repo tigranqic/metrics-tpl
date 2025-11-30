@@ -38,6 +38,7 @@ func (h *Handler) Router() http.Handler {
 
 	r.Get("/", h.listMetricsHandler)
 	r.Get("/ping", h.pingHandler)
+	r.Get("/health", h.healthHandler)
 	r.Get("/value/{type}/{name}", h.getMetricValueHandler)
 	r.Post("/update/{type}/{name}/{value}", h.updateMetricHandler)
 	r.Post("/update/", h.updateMetricJSONHandler)
@@ -54,6 +55,10 @@ func (h *Handler) pingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 

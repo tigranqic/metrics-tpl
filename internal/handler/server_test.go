@@ -208,7 +208,7 @@ func containsAll(s string, substrings ...string) bool {
 }
 
 func setupTestDB(t *testing.T) *sql.DB {
-    dsn := os.Getenv("DATABASE_DSN")
+	dsn := os.Getenv("DATABASE_DSN")
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {

@@ -108,15 +108,31 @@ func Load(isAgent bool) (*Config, error) {
 	fileFlag := flag.String("f", DefaultFileStoragePath, "File path for metrics storage")
 	restoreFlag := flag.Bool("r", DefaultRestore, "Restore metrics from file on startup")
 	dbDSNFlag := flag.String("d", "", "Database DSN connection string")
+	var reportFlag *int
+	var restoreFlag *bool
+	var reportVal int
+	if isAgent {
+		reportFlag = flag.Int("r", DefaultReportInterval, "Report interval in seconds (agent)")
+		reportVal = *reportFlag
+	} else {
+		reportVal = DefaultReportInterval
+	}
 
+	var restoreVal bool
+	if !isAgent {
+		restoreFlag = flag.Bool("r", DefaultRestore, "Restore metrics from file on startup (server)")
+		restoreVal = *restoreFlag
+	} else {
+		restoreVal = DefaultRestore
+	}
 	flag.Parse()
 
 	serverAddr := chooseString(envAddr, envAddrSet, *serverAddrFlag, DefaultServerAddr)
-	reportInterval := chooseInt(envReport, envReportSet, *reportFlag, DefaultReportInterval)
+	reportInterval := chooseInt(envReport, envReportSet, reportVal, DefaultReportInterval)
 	pollInterval := chooseInt(envPoll, envPollSet, *pollFlag, DefaultPollInterval)
 	storeInterval := chooseInt(envStore, envStoreSet, *storeFlag, DefaultStoreInterval)
 	fileStorage := chooseString(envFile, envFileSet, *fileFlag, DefaultFileStoragePath)
-	restore := chooseBool(envRestore, envRestoreSet, *restoreFlag, DefaultRestore)
+	restore := chooseBool(envRestore, envRestoreSet, restoreVal, DefaultRestore)
 	databaseDSN := chooseString(envDBDSN, envDBDSNSet, *dbDSNFlag, "")
 
 	if reportInterval <= 0 {
