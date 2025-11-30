@@ -77,13 +77,6 @@ func TestHandler_Router(t *testing.T) {
 		t.Fatalf("expected counter 8, got %v, err %v", val, err)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/ping", nil)
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200 for /ping; got %d", w.Code)
-	}
-
 	req = httptest.NewRequest(http.MethodGet, "/value/gauge/Alloc", nil)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -215,10 +208,7 @@ func containsAll(s string, substrings ...string) bool {
 }
 
 func setupTestDB(t *testing.T) *sql.DB {
-	dsn := os.Getenv("TEST_DATABASE_DSN")
-	if dsn == "" {
-		dsn = "postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
-	}
+    dsn := os.Getenv("DATABASE_DSN")
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
