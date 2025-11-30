@@ -69,10 +69,12 @@ func (s *PostgresStorage) GetCounter(name string) (int64, error) {
 }
 
 func (s *PostgresStorage) GetAll() map[string]*models.Metrics {
-	rows, _ := s.db.Query(`SELECT id, mtype, delta, value FROM metrics`)
-	defer func() {
-		_ = rows.Close()
-	}()
+	rows, err := s.db.Query(`SELECT id, mtype, delta, value FROM metrics`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
 	result := make(map[string]*models.Metrics)
 
 	for rows.Next() {
@@ -80,7 +82,9 @@ func (s *PostgresStorage) GetAll() map[string]*models.Metrics {
 		var delta sql.NullInt64
 		var value sql.NullFloat64
 
-		_ = rows.Scan(&id, &mtype, &delta, &value)
+		if err := rows.Scan(&id, &mtype, &delta, &value); err != nil {
+			continue
+		}
 
 		m := &models.Metrics{
 			ID:    id,
@@ -97,6 +101,10 @@ func (s *PostgresStorage) GetAll() map[string]*models.Metrics {
 		}
 
 		result[id] = m
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil
 	}
 
 	return result
