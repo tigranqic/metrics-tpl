@@ -13,6 +13,7 @@ import (
 
 type Storage interface {
 	Update(metricType, name, value string) error
+	UpdateBatch(batch []models.Metrics) error
 	GetGauge(name string) (float64, error)
 	GetCounter(name string) (int64, error)
 	GetAll() map[string]*models.Metrics
@@ -175,4 +176,47 @@ func (s *MemStorage) StartAutoSave(filePath string, interval time.Duration, stop
 			}
 		}
 	}()
+}
+
+func (s *MemStorage) UpdateBatch(batch []models.Metrics) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, m := range batch {
+		if m.ID == "" || (m.MType != models.Gauge && m.MType != models.Counter) {
+			continue
+		}
+
+		switch m.MType {
+		case models.Gauge:
+			if m.Value == nil {
+				continue
+			}
+			v := *m.Value
+			s.metrics[m.ID] = &models.Metrics{
+				ID:    m.ID,
+				MType: models.Gauge,
+				Value: &v,
+			}
+
+		case models.Counter:
+			if m.Delta == nil {
+				continue
+			}
+			d := *m.Delta
+			if ex, ok := s.metrics[m.ID]; ok && ex.Delta != nil {
+				d += *ex.Delta
+			}
+			s.metrics[m.ID] = &models.Metrics{
+				ID:    m.ID,
+				MType: models.Counter,
+				Delta: &d,
+			}
+		}
+	}
+
+	if s.syncWrite && s.filePath != "" {
+		return s.SaveToFile(s.filePath)
+	}
+	return nil
 }

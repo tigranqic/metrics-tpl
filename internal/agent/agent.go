@@ -175,6 +175,78 @@ func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error
 	return fmt.Errorf("server %s not responding within %s", baseURL, timeout)
 }
 
+func (a *Agent) sendBatch(metrics []models.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	fullURL := a.ServerURL + "/updates/"
+
+	body, err := json.Marshal(metrics)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metrics batch: %w", err)
+	}
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(body); err != nil {
+		return fmt.Errorf("gzip write failed: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("gzip close failed: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, fullURL, &buf)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	start := time.Now()
+	resp, err := a.client.Do(req)
+	duration := time.Since(start)
+
+	if err != nil {
+		return fmt.Errorf("failed to send batch: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	a.log.Info("metric sent",
+		zap.String("url", fullURL),
+		zap.Int("status", resp.StatusCode),
+		zap.Duration("duration", duration),
+	)
+
+	if resp.StatusCode == http.StatusNotFound {
+		a.log.Warn("batch endpoint unsupported, falling back to single updates")
+		for _, m := range metrics {
+			var err error
+			if m.MType == MetricTypeGauge {
+				err = a.sendMetric("gauge", m.ID, fmt.Sprintf("%f", *m.Value))
+			} else {
+				err = a.sendMetric("counter", m.ID, fmt.Sprintf("%d", *m.Delta))
+			}
+
+			if err != nil {
+				a.log.Error("failed to send metric %s: %v", zap.String("metric ID", m.ID), zap.Error(err))
+				return err
+			}
+		}
+		return nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned %s", resp.Status)
+	}
+
+	return nil
+}
+
 func (a *Agent) Run(stop <-chan struct{}) {
 	a.log.Info("starting agent loop", zap.String("server", a.ServerURL))
 
@@ -199,17 +271,30 @@ func (a *Agent) Run(stop <-chan struct{}) {
 
 		case <-reportTicker.C:
 			a.log.Debug("sending metrics batch", zap.Int("count", len(a.metrics)))
+
+			var batch []models.Metrics
+
 			for name, val := range a.metrics {
-				var metricType string
+				var m models.Metrics
+				m.ID = name
+
 				if name == "PollCount" {
-					metricType = "counter"
+					m.MType = MetricTypeCounter
+					v, _ := strconv.ParseInt(val, 10, 64)
+					m.Delta = &v
 				} else {
-					metricType = "gauge"
+					m.MType = MetricTypeGauge
+					v, _ := strconv.ParseFloat(val, 64)
+					m.Value = &v
 				}
-				if err := a.sendMetric(metricType, name, val); err != nil {
-					a.log.Error("failed to send metric", zap.String("name", name), zap.Error(err))
-				}
+
+				batch = append(batch, m)
 			}
+
+			if err := a.sendBatch(batch); err != nil {
+				a.log.Error("failed to send batch", zap.Error(err))
+			}
+
 			a.lastReportedPollCount = a.pollCount
 
 		case <-stop:

@@ -73,7 +73,9 @@ func (s *PostgresStorage) GetAll() map[string]*models.Metrics {
 	if err != nil {
 		return nil
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	result := make(map[string]*models.Metrics)
 
@@ -108,4 +110,49 @@ func (s *PostgresStorage) GetAll() map[string]*models.Metrics {
 	}
 
 	return result
+}
+
+func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	for _, m := range batch {
+		switch m.MType {
+
+		case models.Gauge:
+			if m.Value == nil {
+				continue
+			}
+			_, err := tx.Exec(`
+				INSERT INTO metrics (id, mtype, value)
+				VALUES ($1, 'gauge', $2)
+				ON CONFLICT (id)
+				DO UPDATE SET value = EXCLUDED.value
+			`, m.ID, *m.Value)
+			if err != nil {
+				return err
+			}
+
+		case models.Counter:
+			if m.Delta == nil {
+				continue
+			}
+			_, err := tx.Exec(`
+				INSERT INTO metrics (id, mtype, delta)
+				VALUES ($1, 'counter', $2)
+				ON CONFLICT (id)
+				DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
+			`, m.ID, *m.Delta)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return tx.Commit()
 }

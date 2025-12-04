@@ -41,6 +41,7 @@ func (h *Handler) Router() http.Handler {
 	r.Get("/health", h.healthHandler)
 	r.Get("/value/{type}/{name}", h.getMetricValueHandler)
 	r.Post("/update/{type}/{name}/{value}", h.updateMetricHandler)
+	r.Post("/updates/", h.updateMetricsBatchHandler)
 	r.Post("/update/", h.updateMetricJSONHandler)
 	r.Post("/value/", h.getMetricValueJSONHandler)
 	r.Post("/update", h.updateMetricJSONHandler)
@@ -126,6 +127,36 @@ func (h *Handler) getMetricValueHandler(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(result))
+}
+
+func (h *Handler) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Request) {
+	var metrics []models.Metrics
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+	defer func() {
+		_ = r.Body.Close()
+	}()
+
+	if err := json.Unmarshal(body, &metrics); err != nil {
+		http.Error(w, "failed to decode JSON", http.StatusBadRequest)
+		return
+	}
+
+	if len(metrics) == 0 {
+		http.Error(w, "empty batch", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.store.UpdateBatch(metrics); err != nil {
+		http.Error(w, "failed to update metrics", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) listMetricsHandler(w http.ResponseWriter, r *http.Request) {
