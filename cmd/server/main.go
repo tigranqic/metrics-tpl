@@ -53,7 +53,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		store = repository.NewPostgresStorage(db)
+		store = repository.NewPostgresStorage(db, log)
 		log.Info("using PostgreSQL storage")
 	} else {
 		if cfg.FileStoragePath != "" {

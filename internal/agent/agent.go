@@ -180,71 +180,92 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 		return nil
 	}
 
-	fullURL := a.ServerURL + "/updates/"
+	send := func() error {
+		fullURL := a.ServerURL + "/updates/"
+		body, err := json.Marshal(metrics)
+		if err != nil {
+			return fmt.Errorf("marshal metrics batch: %w", err)
+		}
 
-	body, err := json.Marshal(metrics)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metrics batch: %w", err)
-	}
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		if _, err := gz.Write(body); err != nil {
+			return fmt.Errorf("gzip write failed: %w", err)
+		}
+		if err := gz.Close(); err != nil {
+			return fmt.Errorf("gzip close failed: %w", err)
+		}
 
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(body); err != nil {
-		return fmt.Errorf("gzip write failed: %w", err)
-	}
-	if err := gz.Close(); err != nil {
-		return fmt.Errorf("gzip close failed: %w", err)
-	}
+		req, err := http.NewRequest(http.MethodPost, fullURL, &buf)
+		if err != nil {
+			return fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Encoding", "gzip")
+		req.Header.Set("Accept-Encoding", "gzip")
 
-	req, err := http.NewRequest(http.MethodPost, fullURL, &buf)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
+		start := time.Now()
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("Accept-Encoding", "gzip")
+		resp, err := a.client.Do(req)
+		duration := time.Since(start)
 
-	start := time.Now()
-	resp, err := a.client.Do(req)
-	duration := time.Since(start)
+		if err != nil {
+			return fmt.Errorf("send batch failed: %w", err)
+		}
+		defer func() {
+			_ = resp.Body.Close()
+		}()
+		a.log.Info("metric sent",
+			zap.String("url", fullURL),
+			zap.Int("status", resp.StatusCode),
+			zap.Duration("duration", duration),
+		)
 
-	if err != nil {
-		return fmt.Errorf("failed to send batch: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	a.log.Info("metric sent",
-		zap.String("url", fullURL),
-		zap.Int("status", resp.StatusCode),
-		zap.Duration("duration", duration),
-	)
-
-	if resp.StatusCode == http.StatusNotFound {
-		a.log.Warn("batch endpoint unsupported, falling back to single updates")
-		for _, m := range metrics {
-			var err error
-			if m.MType == MetricTypeGauge {
-				err = a.sendMetric("gauge", m.ID, fmt.Sprintf("%f", *m.Value))
-			} else {
-				err = a.sendMetric("counter", m.ID, fmt.Sprintf("%d", *m.Delta))
-			}
-
-			if err != nil {
-				a.log.Error("failed to send metric %s: %v", zap.String("metric ID", m.ID), zap.Error(err))
-				return err
-			}
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("batch endpoint not found")
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("server returned %s", resp.Status)
 		}
 		return nil
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server returned %s", resp.Status)
+	if err := retry([]time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}, send); err != nil {
+		a.log.Warn("batch failed, falling back to individual metrics", zap.Error(err))
+		for _, m := range metrics {
+			var metricErr error
+			if m.MType == MetricTypeGauge {
+				metricErr = a.sendMetricWithRetry("gauge", m.ID, fmt.Sprintf("%f", *m.Value))
+			} else {
+				metricErr = a.sendMetricWithRetry("counter", m.ID, fmt.Sprintf("%d", *m.Delta))
+			}
+			if metricErr != nil {
+				a.log.Error("metric failed after retries", zap.String("metric", m.ID), zap.Error(metricErr))
+				return metricErr
+			}
+		}
 	}
 
 	return nil
+}
+
+func (a *Agent) sendMetricWithRetry(metricType, name, value string) error {
+	delays := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
+	return retry(delays, func() error {
+		return a.sendMetric(metricType, name, value)
+	})
+}
+
+func retry(attempts []time.Duration, operation func() error) error {
+	var lastErr error
+	for _, delay := range attempts {
+		lastErr = operation()
+		if lastErr == nil {
+			return nil
+		}
+		time.Sleep(delay)
+	}
+	return lastErr
 }
 
 func (a *Agent) Run(stop <-chan struct{}) {

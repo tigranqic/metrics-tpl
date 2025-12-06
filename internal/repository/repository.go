@@ -1,22 +1,28 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"strconv"
 
 	models "github.com/tigranqic/metrics-tpl/internal/model"
+	"go.uber.org/zap"
 )
 
 type PostgresStorage struct {
-	db *sql.DB
+	dbExec DBExecutor
+	db     *sql.DB
+	log    *zap.Logger
 }
 
-func NewPostgresStorage(db *sql.DB) *PostgresStorage {
-	return &PostgresStorage{db: db}
+func NewPostgresStorage(db *sql.DB, log *zap.Logger) *PostgresStorage {
+	return &PostgresStorage{dbExec: db, db: db, log: log}
 }
 
 func (s *PostgresStorage) Update(metricType, name, value string) error {
+	ctx := context.Background()
+
 	switch metricType {
 
 	case models.Gauge:
@@ -25,13 +31,12 @@ func (s *PostgresStorage) Update(metricType, name, value string) error {
 			return err
 		}
 
-		_, err = s.db.Exec(`
+		return ExecWithRetry(ctx, s.db, s.log, `
 			INSERT INTO metrics (id, mtype, value)
 			VALUES ($1, 'gauge', $2)
 			ON CONFLICT (id)
 			DO UPDATE SET value = EXCLUDED.value
 		`, name, v)
-		return err
 
 	case models.Counter:
 		delta, err := strconv.ParseInt(value, 10, 64)
@@ -39,13 +44,12 @@ func (s *PostgresStorage) Update(metricType, name, value string) error {
 			return err
 		}
 
-		_, err = s.db.Exec(`
+		return ExecWithRetry(ctx, s.db, s.log, `
 			INSERT INTO metrics (id, mtype, delta)
 			VALUES ($1, 'counter', $2)
 			ON CONFLICT (id)
 			DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
 		`, name, delta)
-		return err
 
 	default:
 		return errors.New("unsupported metric type")
@@ -113,6 +117,8 @@ func (s *PostgresStorage) GetAll() map[string]*models.Metrics {
 }
 
 func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
+	ctx := context.Background()
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -128,12 +134,13 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 			if m.Value == nil {
 				continue
 			}
-			_, err := tx.Exec(`
+			err = ExecWithRetry(ctx, s.db, s.log, `
 				INSERT INTO metrics (id, mtype, value)
 				VALUES ($1, 'gauge', $2)
 				ON CONFLICT (id)
 				DO UPDATE SET value = EXCLUDED.value
 			`, m.ID, *m.Value)
+
 			if err != nil {
 				return err
 			}
@@ -142,7 +149,7 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 			if m.Delta == nil {
 				continue
 			}
-			_, err := tx.Exec(`
+			err = ExecWithRetry(ctx, s.db, s.log, `
 				INSERT INTO metrics (id, mtype, delta)
 				VALUES ($1, 'counter', $2)
 				ON CONFLICT (id)

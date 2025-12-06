@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	models "github.com/tigranqic/metrics-tpl/internal/model"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 )
 
@@ -33,7 +34,6 @@ func TestSendMetric(t *testing.T) {
 	var gotMethod string
 	var gotPath string
 
-	// сервер распаковывает gzip, если Content-Encoding: gzip
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
@@ -94,6 +94,85 @@ func TestSendMetric(t *testing.T) {
 		}
 	}
 }
+
+func TestSendMetricWithRetry(t *testing.T) {
+	callCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount < 3 {
+			http.Error(w, "temporary error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewAgent(server.URL, 2, 10)
+
+	err := a.sendMetricWithRetry("gauge", "Alloc", "42")
+	if err != nil {
+		t.Fatalf("expected metric to succeed eventually, got error: %v", err)
+	}
+
+	if callCount != 3 {
+		t.Errorf("expected 3 attempts, got %d", callCount)
+	}
+}
+
+func TestSendBatchFallback(t *testing.T) {
+	callCount := 0
+	sentMetrics := []string{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if r.URL.Path == "/updates/" {
+			http.NotFound(w, r)
+			return
+		}
+		var bodyBytes []byte
+		if r.Header.Get("Content-Encoding") == "gzip" {
+			gz, _ := gzip.NewReader(r.Body)
+			bodyBytes, _ = io.ReadAll(gz)
+			_ = gz.Close()
+		} else {
+			bodyBytes, _ = io.ReadAll(r.Body)
+		}
+		if strings.Contains(string(bodyBytes), `"id":"`) {
+			body := string(bodyBytes)
+			start := strings.Index(body, `"id":"`)
+			if start != -1 {
+				start += len(`"id":"`)
+				end := strings.Index(body[start:], `"`)
+				if end != -1 {
+					id := body[start : start+end]
+					sentMetrics = append(sentMetrics, id)
+				}
+			}
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewAgent(server.URL, 2, 10)
+
+	metrics := []models.Metrics{
+		{ID: "Alloc", MType: "gauge", Value: ptrFloat64(100)},
+		{ID: "Random", MType: "gauge", Value: ptrFloat64(42)},
+	}
+
+	err := a.sendBatch(metrics)
+	if err != nil {
+		t.Fatalf("sendBatch failed: %v", err)
+	}
+
+	if len(sentMetrics) != 2 {
+		t.Errorf("expected 2 metrics sent individually, got %d", len(sentMetrics))
+	}
+}
+
+func ptrFloat64(f float64) *float64 { return &f }
 
 func TestMain(m *testing.M) {
 	logger.Init("debug", "json")
