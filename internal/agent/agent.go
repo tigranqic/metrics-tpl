@@ -170,6 +170,9 @@ func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error
 			log.Info("server is ready", zap.String("url", baseURL))
 			return nil
 		}
+		if err != nil {
+			log.Debug("server health check failed", zap.Error(err))
+		}
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
@@ -305,12 +308,20 @@ func (a *Agent) Run(stop <-chan struct{}) {
 
 				if name == "PollCount" {
 					m.MType = MetricTypeCounter
-					v, _ := strconv.ParseInt(val, 10, 64)
+					v, err := strconv.ParseInt(val, 10, 64)
+					if err != nil {
+						a.log.Error("failed to parse int metric", zap.String("metric", name), zap.String("value", val), zap.Error(err))
+						continue
+					}
 					m.Delta = &v
 				} else {
 					m.MType = MetricTypeGauge
-					v, _ := strconv.ParseFloat(val, 64)
-					m.Value = &v
+					vF, err := strconv.ParseFloat(val, 64)
+					if err != nil {
+						a.log.Error("failed to parse float metric", zap.String("metric", name), zap.String("value", val), zap.Error(err))
+						continue
+					}
+					m.Value = &vF
 				}
 
 				batch = append(batch, m)
