@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strconv"
 
 	models "github.com/tigranqic/metrics-tpl/internal/model"
@@ -28,28 +29,29 @@ func (s *PostgresStorage) Update(metricType, name, value string) error {
 	case models.Gauge:
 		v, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to parse gauge metric %q: %w", name, err)
 		}
 
-		return ExecWithRetry(ctx, s.db, s.log, `
-			INSERT INTO metrics (id, mtype, value)
+		if err := ExecWithRetry(ctx, s.db, s.log, `INSERT INTO metrics (id, mtype, value)
 			VALUES ($1, 'gauge', $2)
 			ON CONFLICT (id)
-			DO UPDATE SET value = EXCLUDED.value
-		`, name, v)
-
+			DO UPDATE SET value = EXCLUDED.value`, name, v); err != nil {
+			return fmt.Errorf("failed to update gauge metric %q: %w", name, err)
+		}
+		return nil
 	case models.Counter:
 		delta, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to parse counter metric %q: %w", name, err)
 		}
 
-		return ExecWithRetry(ctx, s.db, s.log, `
-			INSERT INTO metrics (id, mtype, delta)
+		if err := ExecWithRetry(ctx, s.db, s.log, `INSERT INTO metrics (id, mtype, delta)
 			VALUES ($1, 'counter', $2)
 			ON CONFLICT (id)
-			DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
-		`, name, delta)
+			DO UPDATE SET delta = metrics.delta + EXCLUDED.delta`, name, delta); err != nil {
+			return fmt.Errorf("failed to update counter metric %q: %w", name, err)
+		}
+		return nil
 
 	default:
 		return errors.New("unsupported metric type")
@@ -61,6 +63,9 @@ func (s *PostgresStorage) GetGauge(name string) (float64, error) {
 	err := s.db.QueryRow(`
 		SELECT value FROM metrics WHERE id=$1 AND mtype='gauge'
 	`, name).Scan(&v)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get gauge metric %q: %w", name, err)
+	}
 	return v, err
 }
 
@@ -69,13 +74,16 @@ func (s *PostgresStorage) GetCounter(name string) (int64, error) {
 	err := s.db.QueryRow(`
 		SELECT delta FROM metrics WHERE id=$1 AND mtype='counter'
 	`, name).Scan(&v)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get counter metric %q: %w", name, err)
+	}
 	return v, err
 }
 
-func (s *PostgresStorage) GetAll() map[string]*models.Metrics {
+func (s *PostgresStorage) GetAll() (map[string]*models.Metrics, error) {
 	rows, err := s.db.Query(`SELECT id, mtype, delta, value FROM metrics`)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("failed to query all metrics: %w", err)
 	}
 	defer func() {
 		_ = rows.Close()
@@ -110,10 +118,10 @@ func (s *PostgresStorage) GetAll() map[string]*models.Metrics {
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil
+		return nil, fmt.Errorf("failed to query all metrics: %w", err)
 	}
 
-	return result
+	return result, nil
 }
 
 func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
@@ -121,7 +129,7 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() {
 		_ = tx.Rollback()
@@ -142,7 +150,7 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 			`, m.ID, *m.Value)
 
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to update gauge metric (batch) %w", err)
 			}
 
 		case models.Counter:
@@ -155,8 +163,9 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 				ON CONFLICT (id)
 				DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
 			`, m.ID, *m.Delta)
+
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to update counter metric (batch) %w", err)
 			}
 		}
 	}

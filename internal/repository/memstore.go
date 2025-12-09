@@ -3,6 +3,7 @@ package repository
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"sync"
@@ -16,7 +17,7 @@ type Storage interface {
 	UpdateBatch(batch []models.Metrics) error
 	GetGauge(name string) (float64, error)
 	GetCounter(name string) (int64, error)
-	GetAll() map[string]*models.Metrics
+	GetAll() (map[string]*models.Metrics, error)
 }
 
 type MemStorage struct {
@@ -101,7 +102,7 @@ func (s *MemStorage) GetCounter(name string) (int64, error) {
 	return *m.Delta, nil
 }
 
-func (s *MemStorage) GetAll() map[string]*models.Metrics {
+func (s *MemStorage) GetAll() (map[string]*models.Metrics, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -110,7 +111,7 @@ func (s *MemStorage) GetAll() map[string]*models.Metrics {
 		copied := *v
 		result[k] = &copied
 	}
-	return result
+	return result, nil
 }
 
 func (s *MemStorage) SaveToFile(filePath string) error {
@@ -128,7 +129,10 @@ func (s *MemStorage) SaveToFile(filePath string) error {
 		return err
 	}
 	defer func() {
-		_ = file.Close()
+		cerr := file.Close()
+		if err == nil && cerr != nil {
+			err = fmt.Errorf("failed to close file: %w", cerr)
+		}
 	}()
 	return json.NewEncoder(file).Encode(data)
 }

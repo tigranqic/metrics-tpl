@@ -141,7 +141,8 @@ func TestPostgresStorage_GetAll(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, mtype, delta, value FROM metrics`)).
 		WillReturnRows(rows)
 
-	result := store.GetAll()
+	result, err := store.GetAll()
+	assert.NoError(t, err)
 	assert.Len(t, result, 2)
 	assert.Equal(t, 10.5, *result["g1"].Value)
 	assert.Equal(t, int64(7), *result["c1"].Delta)

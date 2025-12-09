@@ -166,7 +166,11 @@ func (h *Handler) listMetricsHandler(w http.ResponseWriter, r *http.Request) {
 		Value string
 	}
 
-	all := h.store.GetAll()
+	all, err := h.store.GetAll()
+	if err != nil {
+		http.Error(w, "failed to retrieve metrics", http.StatusInternalServerError)
+		return
+	}
 	var metrics []Metric
 
 	for _, m := range all {
