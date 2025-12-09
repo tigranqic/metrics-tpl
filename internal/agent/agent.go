@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"time"
@@ -85,7 +86,10 @@ func (a *Agent) collectMetrics() {
 }
 
 func (a *Agent) sendMetric(metricType, name, value string) error {
-	fullURL := a.ServerURL + "/update/"
+	fullURL, err := url.JoinPath(a.ServerURL, "/update/")
+	if err != nil {
+		return fmt.Errorf("failed to join URL path: %w", err)
+	}
 
 	var m models.Metrics
 	m.ID = name
