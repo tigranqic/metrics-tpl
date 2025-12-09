@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/hashicorp/go-retryablehttp"
 	models "github.com/tigranqic/metrics-tpl/internal/model"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 	"go.uber.org/zap"
@@ -29,18 +30,24 @@ type Agent struct {
 
 	pollCount             int64
 	lastReportedPollCount int64
-	client                *http.Client
+	client                *retryablehttp.Client
 
 	metrics map[string]string
 	log     *zap.Logger
 }
 
 func NewAgent(serverURL string, pollInterval, reportInterval time.Duration) *Agent {
+	retryClient := retryablehttp.NewClient()
+	retryClient.RetryMax = 3
+	retryClient.RetryWaitMin = 1 * time.Second
+	retryClient.RetryWaitMax = 5 * time.Second
+	retryClient.Logger = &RetryableLogger{log: logger.Get()}
+
 	return &Agent{
 		ServerURL:      serverURL,
 		PollInterval:   pollInterval,
 		ReportInterval: reportInterval,
-		client:         &http.Client{Timeout: 5 * time.Second},
+		client:         retryClient,
 		metrics:        make(map[string]string),
 		log:            logger.Get(),
 	}
@@ -124,7 +131,7 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 		return fmt.Errorf("gzip close failed: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, fullURL, &buf)
+	req, err := retryablehttp.NewRequest(http.MethodPost, fullURL, &buf)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -187,92 +194,67 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 		return nil
 	}
 
-	send := func() error {
-		fullURL := a.ServerURL + "/updates/"
-		body, err := json.Marshal(metrics)
-		if err != nil {
-			return fmt.Errorf("marshal metrics batch: %w", err)
+	fullURL, err := url.JoinPath(a.ServerURL, "/updates/")
+	if err != nil {
+		return fmt.Errorf("failed to join URL path (sendBatch): %w", err)
+	}
+	body, err := json.Marshal(metrics)
+	if err != nil {
+		return fmt.Errorf("marshal metrics batch: %w", err)
+	}
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(body); err != nil {
+		return fmt.Errorf("gzip write failed: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("gzip close failed: %w", err)
+	}
+
+	req, _ := retryablehttp.NewRequest(http.MethodPost, fullURL, &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	start := time.Now()
+	resp, err := a.client.Do(req)
+	duration := time.Since(start)
+
+	if err != nil || resp.StatusCode >= 400 {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			a.log.Warn("batch endpoint not found, falling back to individual metrics")
+		} else if err != nil {
+			a.log.Warn("batch send failed, falling back to individual metrics", zap.Error(err))
+		} else {
+			a.log.Warn("batch send failed with status", zap.Int("status", resp.StatusCode))
 		}
 
-		var buf bytes.Buffer
-		gz := gzip.NewWriter(&buf)
-		if _, err := gz.Write(body); err != nil {
-			return fmt.Errorf("gzip write failed: %w", err)
-		}
-		if err := gz.Close(); err != nil {
-			return fmt.Errorf("gzip close failed: %w", err)
+		if resp != nil {
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 		}
 
-		req, err := http.NewRequest(http.MethodPost, fullURL, &buf)
-		if err != nil {
-			return fmt.Errorf("create request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Content-Encoding", "gzip")
-		req.Header.Set("Accept-Encoding", "gzip")
-
-		start := time.Now()
-
-		resp, err := a.client.Do(req)
-		duration := time.Since(start)
-
-		if err != nil {
-			return fmt.Errorf("send batch failed: %w", err)
-		}
-		defer func() {
-			_ = resp.Body.Close()
-		}()
-		a.log.Info("metric sent",
-			zap.String("url", fullURL),
-			zap.Int("status", resp.StatusCode),
-			zap.Duration("duration", duration),
-		)
-
-		if resp.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("batch endpoint not found")
-		}
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("server returned %s", resp.Status)
+		for _, m := range metrics {
+			if m.MType == "gauge" {
+				_ = a.sendMetric("gauge", m.ID, fmt.Sprintf("%f", *m.Value))
+			} else {
+				_ = a.sendMetric("counter", m.ID, fmt.Sprintf("%d", *m.Delta))
+			}
 		}
 		return nil
 	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
-	if err := retry([]time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}, send); err != nil {
-		a.log.Warn("batch failed, falling back to individual metrics", zap.Error(err))
-		for _, m := range metrics {
-			var metricErr error
-			if m.MType == MetricTypeGauge {
-				metricErr = a.sendMetricWithRetry("gauge", m.ID, fmt.Sprintf("%f", *m.Value))
-			} else {
-				metricErr = a.sendMetricWithRetry("counter", m.ID, fmt.Sprintf("%d", *m.Delta))
-			}
-			if metricErr != nil {
-				a.log.Error("metric failed after retries", zap.String("metric", m.ID), zap.Error(metricErr))
-				return metricErr
-			}
-		}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned %s", resp.Status)
 	}
 
+	a.log.Info("batch sent", zap.Int("count", len(metrics)), zap.Int("status", resp.StatusCode), zap.Duration("duration", duration))
 	return nil
-}
-
-func (a *Agent) sendMetricWithRetry(metricType, name, value string) error {
-	delays := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
-	return retry(delays, func() error {
-		return a.sendMetric(metricType, name, value)
-	})
-}
-
-func retry(attempts []time.Duration, operation func() error) error {
-	var lastErr error
-	for _, delay := range attempts {
-		lastErr = operation()
-		if lastErr == nil {
-			return nil
-		}
-		time.Sleep(delay)
-	}
-	return lastErr
 }
 
 func (a *Agent) Run(stop <-chan struct{}) {

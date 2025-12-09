@@ -161,7 +161,7 @@ func (h *Handler) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	if len(metrics) == 0 {
-		h.log.Error("empty batch", zap.Error(err))
+		h.log.Error("empty batch", zap.String("metrics len", strconv.Itoa(len(metrics))))
 		http.Error(w, "empty batch", http.StatusBadRequest)
 		return
 	}

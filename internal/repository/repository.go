@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	models "github.com/tigranqic/metrics-tpl/internal/model"
 	"go.uber.org/zap"
@@ -125,48 +126,70 @@ func (s *PostgresStorage) GetAll() (map[string]*models.Metrics, error) {
 }
 
 func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
-	ctx := context.Background()
+	if len(batch) == 0 {
+		return nil
+	}
 
+	ctx := context.Background()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
+	defer tx.Rollback()
 
+	var gaugeBatch, counterBatch []models.Metrics
 	for _, m := range batch {
 		switch m.MType {
-
 		case models.Gauge:
-			if m.Value == nil {
-				continue
+			if m.Value != nil {
+				gaugeBatch = append(gaugeBatch, m)
 			}
-			err = ExecWithRetry(ctx, s.db, s.log, `
-				INSERT INTO metrics (id, mtype, value)
-				VALUES ($1, 'gauge', $2)
-				ON CONFLICT (id)
-				DO UPDATE SET value = EXCLUDED.value
-			`, m.ID, *m.Value)
-
-			if err != nil {
-				return fmt.Errorf("failed to update gauge metric (batch) %w", err)
-			}
-
 		case models.Counter:
-			if m.Delta == nil {
-				continue
+			if m.Delta != nil {
+				counterBatch = append(counterBatch, m)
 			}
-			err = ExecWithRetry(ctx, s.db, s.log, `
-				INSERT INTO metrics (id, mtype, delta)
-				VALUES ($1, 'counter', $2)
-				ON CONFLICT (id)
-				DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
-			`, m.ID, *m.Delta)
+		}
+	}
 
-			if err != nil {
-				return fmt.Errorf("failed to update counter metric (batch) %w", err)
-			}
+	if len(gaugeBatch) > 0 {
+		var placeholders []string
+		var values []interface{}
+		i := 1
+		for _, m := range gaugeBatch {
+			placeholders = append(placeholders, fmt.Sprintf("($%d, 'gauge', $%d)", i, i+1))
+			values = append(values, m.ID, *m.Value)
+			i += 2
+		}
+
+		query := fmt.Sprintf(`
+            INSERT INTO metrics (id, mtype, value)
+            VALUES %s
+            ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value
+        `, strings.Join(placeholders, ","))
+
+		if _, err := tx.ExecContext(ctx, query, values...); err != nil {
+			return fmt.Errorf("failed to update gauge batch: %w", err)
+		}
+	}
+
+	if len(counterBatch) > 0 {
+		var placeholders []string
+		var values []interface{}
+		i := 1
+		for _, m := range counterBatch {
+			placeholders = append(placeholders, fmt.Sprintf("($%d, 'counter', $%d)", i, i+1))
+			values = append(values, m.ID, *m.Delta)
+			i += 2
+		}
+
+		query := fmt.Sprintf(`
+            INSERT INTO metrics (id, mtype, delta)
+            VALUES %s
+            ON CONFLICT (id) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
+        `, strings.Join(placeholders, ","))
+
+		if _, err := tx.ExecContext(ctx, query, values...); err != nil {
+			return fmt.Errorf("failed to update counter batch: %w", err)
 		}
 	}
 

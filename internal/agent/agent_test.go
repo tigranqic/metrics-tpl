@@ -2,12 +2,14 @@ package agent
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	models "github.com/tigranqic/metrics-tpl/internal/model"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
@@ -95,7 +97,7 @@ func TestSendMetric(t *testing.T) {
 	}
 }
 
-func TestSendMetricWithRetry(t *testing.T) {
+func TestSendMetricRetryableHTTP(t *testing.T) {
 	callCount := 0
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,9 +110,9 @@ func TestSendMetricWithRetry(t *testing.T) {
 	}))
 	defer server.Close()
 
-	a := NewAgent(server.URL, 2, 10)
+	a := NewAgent(server.URL, 2*time.Second, 10*time.Second)
 
-	err := a.sendMetricWithRetry("gauge", "Alloc", "42")
+	err := a.sendMetric("gauge", "Alloc", "42")
 	if err != nil {
 		t.Fatalf("expected metric to succeed eventually, got error: %v", err)
 	}
@@ -120,7 +122,7 @@ func TestSendMetricWithRetry(t *testing.T) {
 	}
 }
 
-func TestSendBatchFallback(t *testing.T) {
+func TestSendBatchFallbackRetryableHTTP(t *testing.T) {
 	callCount := 0
 	sentMetrics := []string{}
 
@@ -130,6 +132,7 @@ func TestSendBatchFallback(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+
 		var bodyBytes []byte
 		if r.Header.Get("Content-Encoding") == "gzip" {
 			gz, _ := gzip.NewReader(r.Body)
@@ -138,24 +141,17 @@ func TestSendBatchFallback(t *testing.T) {
 		} else {
 			bodyBytes, _ = io.ReadAll(r.Body)
 		}
-		if strings.Contains(string(bodyBytes), `"id":"`) {
-			body := string(bodyBytes)
-			start := strings.Index(body, `"id":"`)
-			if start != -1 {
-				start += len(`"id":"`)
-				end := strings.Index(body[start:], `"`)
-				if end != -1 {
-					id := body[start : start+end]
-					sentMetrics = append(sentMetrics, id)
-				}
-			}
+
+		var m models.Metrics
+		if err := json.Unmarshal(bodyBytes, &m); err == nil {
+			sentMetrics = append(sentMetrics, m.ID)
 		}
 
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	a := NewAgent(server.URL, 2, 10)
+	a := NewAgent(server.URL, 2*time.Second, 10*time.Second)
 
 	metrics := []models.Metrics{
 		{ID: "Alloc", MType: "gauge", Value: ptrFloat64(100)},
