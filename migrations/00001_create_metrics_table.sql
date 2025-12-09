@@ -1,8 +1,8 @@
 -- +goose Up
 -- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS metrics (
-    id TEXT PRIMARY KEY,
-    mtype TEXT NOT NULL,
+    id varchar(256) PRIMARY KEY,
+    mtype varchar(256) NOT NULL,
     delta BIGINT,
     value DOUBLE PRECISION
 );
