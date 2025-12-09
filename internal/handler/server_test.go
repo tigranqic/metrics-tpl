@@ -10,6 +10,7 @@ import (
 
 	_ "github.com/lib/pq"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
+	"go.uber.org/zap"
 )
 
 func TestHandler_Router(t *testing.T) {
@@ -20,7 +21,8 @@ func TestHandler_Router(t *testing.T) {
 			t.Fatalf("failed to close test DB: %v", err)
 		}
 	}()
-	h := NewHandler(store, db)
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger)
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/update/gauge/Alloc/123.45", nil)
@@ -124,7 +126,8 @@ func TestHandler_JSONEndpoints(t *testing.T) {
 			t.Fatalf("failed to close test DB: %v", err)
 		}
 	}()
-	h := NewHandler(store, db)
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger)
 	router := h.Router()
 
 	gaugeBody := `{"id":"Alloc","type":"gauge","value":123.45}`
