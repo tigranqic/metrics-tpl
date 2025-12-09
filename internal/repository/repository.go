@@ -137,56 +137,62 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 	}
 	defer tx.Rollback()
 
-	var gaugeBatch, counterBatch []models.Metrics
+	// Для gauge берём последнюю метрику на ID
+	uniqueGauges := make(map[string]models.Metrics)
+	// Для counter суммируем дельты
+	counterSums := make(map[string]int64)
+
 	for _, m := range batch {
 		switch m.MType {
 		case models.Gauge:
 			if m.Value != nil {
-				gaugeBatch = append(gaugeBatch, m)
+				uniqueGauges[m.ID] = m
 			}
 		case models.Counter:
 			if m.Delta != nil {
-				counterBatch = append(counterBatch, m)
+				counterSums[m.ID] += *m.Delta
 			}
 		}
 	}
 
-	if len(gaugeBatch) > 0 {
+	// Batch INSERT для gauge
+	if len(uniqueGauges) > 0 {
 		var placeholders []string
 		var values []interface{}
 		i := 1
-		for _, m := range gaugeBatch {
+		for _, m := range uniqueGauges {
 			placeholders = append(placeholders, fmt.Sprintf("($%d, 'gauge', $%d)", i, i+1))
 			values = append(values, m.ID, *m.Value)
 			i += 2
 		}
 
 		query := fmt.Sprintf(`
-            INSERT INTO metrics (id, mtype, value)
-            VALUES %s
-            ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value
-        `, strings.Join(placeholders, ","))
+			INSERT INTO metrics (id, mtype, value)
+			VALUES %s
+			ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value
+		`, strings.Join(placeholders, ","))
 
 		if _, err := tx.ExecContext(ctx, query, values...); err != nil {
 			return fmt.Errorf("failed to update gauge batch: %w", err)
 		}
 	}
 
-	if len(counterBatch) > 0 {
+	// Batch INSERT для counter с суммированием
+	if len(counterSums) > 0 {
 		var placeholders []string
 		var values []interface{}
 		i := 1
-		for _, m := range counterBatch {
+		for id, delta := range counterSums {
 			placeholders = append(placeholders, fmt.Sprintf("($%d, 'counter', $%d)", i, i+1))
-			values = append(values, m.ID, *m.Delta)
+			values = append(values, id, delta)
 			i += 2
 		}
 
 		query := fmt.Sprintf(`
-            INSERT INTO metrics (id, mtype, delta)
-            VALUES %s
-            ON CONFLICT (id) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
-        `, strings.Join(placeholders, ","))
+			INSERT INTO metrics (id, mtype, delta)
+			VALUES %s
+			ON CONFLICT (id) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
+		`, strings.Join(placeholders, ","))
 
 		if _, err := tx.ExecContext(ctx, query, values...); err != nil {
 			return fmt.Errorf("failed to update counter batch: %w", err)
