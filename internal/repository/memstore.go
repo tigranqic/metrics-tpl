@@ -3,6 +3,7 @@ package repository
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"sync"
@@ -13,9 +14,10 @@ import (
 
 type Storage interface {
 	Update(metricType, name, value string) error
+	UpdateBatch(batch []models.Metrics) error
 	GetGauge(name string) (float64, error)
 	GetCounter(name string) (int64, error)
-	GetAll() map[string]*models.Metrics
+	GetAll() (map[string]*models.Metrics, error)
 }
 
 type MemStorage struct {
@@ -100,7 +102,7 @@ func (s *MemStorage) GetCounter(name string) (int64, error) {
 	return *m.Delta, nil
 }
 
-func (s *MemStorage) GetAll() map[string]*models.Metrics {
+func (s *MemStorage) GetAll() (map[string]*models.Metrics, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -109,7 +111,7 @@ func (s *MemStorage) GetAll() map[string]*models.Metrics {
 		copied := *v
 		result[k] = &copied
 	}
-	return result
+	return result, nil
 }
 
 func (s *MemStorage) SaveToFile(filePath string) error {
@@ -126,8 +128,12 @@ func (s *MemStorage) SaveToFile(filePath string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-
+	defer func() {
+		cerr := file.Close()
+		if err == nil && cerr != nil {
+			err = fmt.Errorf("failed to close file: %w", cerr)
+		}
+	}()
 	return json.NewEncoder(file).Encode(data)
 }
 
@@ -142,8 +148,9 @@ func (s *MemStorage) LoadFromFile(filePath string) error {
 		}
 		return err
 	}
-	defer file.Close()
-
+	defer func() {
+		_ = file.Close()
+	}()
 	var data []*models.Metrics
 	if err := json.NewDecoder(file).Decode(&data); err != nil {
 		return err
@@ -173,4 +180,47 @@ func (s *MemStorage) StartAutoSave(filePath string, interval time.Duration, stop
 			}
 		}
 	}()
+}
+
+func (s *MemStorage) UpdateBatch(batch []models.Metrics) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, m := range batch {
+		if m.ID == "" || (m.MType != models.Gauge && m.MType != models.Counter) {
+			continue
+		}
+
+		switch m.MType {
+		case models.Gauge:
+			if m.Value == nil {
+				continue
+			}
+			v := *m.Value
+			s.metrics[m.ID] = &models.Metrics{
+				ID:    m.ID,
+				MType: models.Gauge,
+				Value: &v,
+			}
+
+		case models.Counter:
+			if m.Delta == nil {
+				continue
+			}
+			d := *m.Delta
+			if ex, ok := s.metrics[m.ID]; ok && ex.Delta != nil {
+				d += *ex.Delta
+			}
+			s.metrics[m.ID] = &models.Metrics{
+				ID:    m.ID,
+				MType: models.Counter,
+				Delta: &d,
+			}
+		}
+	}
+
+	if s.syncWrite && s.filePath != "" {
+		return s.SaveToFile(s.filePath)
+	}
+	return nil
 }

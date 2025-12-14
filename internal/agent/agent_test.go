@@ -2,13 +2,16 @@ package agent
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	models "github.com/tigranqic/metrics-tpl/internal/model"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 )
 
@@ -33,7 +36,6 @@ func TestSendMetric(t *testing.T) {
 	var gotMethod string
 	var gotPath string
 
-	// сервер распаковывает gzip, если Content-Encoding: gzip
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
@@ -94,6 +96,79 @@ func TestSendMetric(t *testing.T) {
 		}
 	}
 }
+
+func TestSendMetricRetryableHTTP(t *testing.T) {
+	callCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount < 3 {
+			http.Error(w, "temporary error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewAgent(server.URL, 2*time.Second, 10*time.Second)
+
+	err := a.sendMetric("gauge", "Alloc", "42")
+	if err != nil {
+		t.Fatalf("expected metric to succeed eventually, got error: %v", err)
+	}
+
+	if callCount != 3 {
+		t.Errorf("expected 3 attempts, got %d", callCount)
+	}
+}
+
+func TestSendBatchFallbackRetryableHTTP(t *testing.T) {
+	callCount := 0
+	sentMetrics := []string{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if r.URL.Path == "/updates/" {
+			http.NotFound(w, r)
+			return
+		}
+
+		var bodyBytes []byte
+		if r.Header.Get("Content-Encoding") == "gzip" {
+			gz, _ := gzip.NewReader(r.Body)
+			bodyBytes, _ = io.ReadAll(gz)
+			_ = gz.Close()
+		} else {
+			bodyBytes, _ = io.ReadAll(r.Body)
+		}
+
+		var m models.Metrics
+		if err := json.Unmarshal(bodyBytes, &m); err == nil {
+			sentMetrics = append(sentMetrics, m.ID)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewAgent(server.URL, 2*time.Second, 10*time.Second)
+
+	metrics := []models.Metrics{
+		{ID: "Alloc", MType: "gauge", Value: ptrFloat64(100)},
+		{ID: "Random", MType: "gauge", Value: ptrFloat64(42)},
+	}
+
+	err := a.sendBatch(metrics)
+	if err != nil {
+		t.Fatalf("sendBatch failed: %v", err)
+	}
+
+	if len(sentMetrics) != 2 {
+		t.Errorf("expected 2 metrics sent individually, got %d", len(sentMetrics))
+	}
+}
+
+func ptrFloat64(f float64) *float64 { return &f }
 
 func TestMain(m *testing.M) {
 	logger.Init("debug", "json")

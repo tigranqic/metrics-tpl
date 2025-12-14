@@ -10,26 +10,28 @@ import (
 )
 
 type Config struct {
-	LogLevel       string
-	LogFormat      string
-	ServerAddr     string
-	ReportInterval time.Duration
-	PollInterval   time.Duration
-	IsAgent        bool
+	LogLevel        string
+	LogFormat       string
+	ServerAddr      string
+	ReportInterval  time.Duration
+	PollInterval    time.Duration
+	IsAgent         bool
 	StoreInterval   time.Duration
 	FileStoragePath string
 	Restore         bool
+	DatabaseDSN     string
 }
 
 const (
-	DefaultLogLevel       = "info"
-	DefaultLogFormat      = "json"
-	DefaultServerAddr     = "localhost:8080"
-	DefaultReportInterval = 10
-	DefaultPollInterval   = 2
+	DefaultLogLevel        = "info"
+	DefaultLogFormat       = "json"
+	DefaultServerAddr      = "localhost:8080"
+	DefaultReportInterval  = 10
+	DefaultPollInterval    = 2
 	DefaultStoreInterval   = 15
 	DefaultFileStoragePath = "metrics.json"
 	DefaultRestore         = false
+	DefaultDBDSN           = "postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
 )
 
 func getenvInt(key string, def int) (int, bool) {
@@ -95,24 +97,41 @@ func Load(isAgent bool) (*Config, error) {
 	envStore, envStoreSet := getenvInt("STORE_INTERVAL", DefaultStoreInterval)
 	envFile, envFileSet := getenvString("FILE_STORAGE_PATH", DefaultFileStoragePath)
 	envRestore, envRestoreSet := getenvBool("RESTORE", DefaultRestore)
+	envDBDSN, envDBDSNSet := getenvString("DATABASE_DSN", "")
 
 	logLevel := flag.String("log-level", DefaultLogLevel, "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", DefaultLogFormat, "Log format: text or json")
 	serverAddrFlag := flag.String("a", DefaultServerAddr, "HTTP server address")
-	reportFlag := flag.Int("r", DefaultReportInterval, "Report interval in seconds")
 	pollFlag := flag.Int("p", DefaultPollInterval, "Poll interval in seconds")
 	storeFlag := flag.Int("i", DefaultStoreInterval, "Interval in seconds to store metrics (0 = sync)")
 	fileFlag := flag.String("f", DefaultFileStoragePath, "File path for metrics storage")
-	restoreFlag := flag.Bool("R", DefaultRestore, "Restore metrics from file on startup")
+	dbDSNFlag := flag.String("d", "", "Database DSN connection string")
+	var reportFlag *int
+	var restoreFlag *bool
+	var reportVal int
+	if isAgent {
+		reportFlag = flag.Int("r", DefaultReportInterval, "Report interval in seconds (agent)")
+		reportVal = *reportFlag
+	} else {
+		reportVal = DefaultReportInterval
+	}
 
+	var restoreVal bool
+	if !isAgent {
+		restoreFlag = flag.Bool("r", DefaultRestore, "Restore metrics from file on startup (server)")
+		restoreVal = *restoreFlag
+	} else {
+		restoreVal = DefaultRestore
+	}
 	flag.Parse()
 
 	serverAddr := chooseString(envAddr, envAddrSet, *serverAddrFlag, DefaultServerAddr)
-	reportInterval := chooseInt(envReport, envReportSet, *reportFlag, DefaultReportInterval)
+	reportInterval := chooseInt(envReport, envReportSet, reportVal, DefaultReportInterval)
 	pollInterval := chooseInt(envPoll, envPollSet, *pollFlag, DefaultPollInterval)
 	storeInterval := chooseInt(envStore, envStoreSet, *storeFlag, DefaultStoreInterval)
 	fileStorage := chooseString(envFile, envFileSet, *fileFlag, DefaultFileStoragePath)
-	restore := chooseBool(envRestore, envRestoreSet, *restoreFlag, DefaultRestore)
+	restore := chooseBool(envRestore, envRestoreSet, restoreVal, DefaultRestore)
+	databaseDSN := chooseString(envDBDSN, envDBDSNSet, *dbDSNFlag, "")
 
 	if reportInterval <= 0 {
 		return nil, errors.New("report interval must be greater than zero")
@@ -138,5 +157,6 @@ func Load(isAgent bool) (*Config, error) {
 		StoreInterval:   time.Duration(storeInterval) * time.Second,
 		FileStoragePath: fileStorage,
 		Restore:         restore,
+		DatabaseDSN:     databaseDSN,
 	}, nil
 }

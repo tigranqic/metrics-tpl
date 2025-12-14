@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 
+	_ "github.com/lib/pq"
+
 	"github.com/tigranqic/metrics-tpl/internal/config"
 	"github.com/tigranqic/metrics-tpl/internal/handler"
 	"github.com/tigranqic/metrics-tpl/internal/middleware"
@@ -28,23 +30,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	store := repository.NewMemStorage(cfg.FileStoragePath, cfg.StoreInterval)
-
-	if cfg.Restore {
-		if err := store.LoadFromFile(cfg.FileStoragePath); err != nil {
-			log.Error("failed to restore metrics", zap.Error(err))
-		} else {
-			log.Info("metrics restored successfully", zap.String("file", cfg.FileStoragePath))
-		}
+	db, store, err := repository.InitStorage(cfg, log)
+	if err != nil {
+		log.Fatal("failed to initialize storage", zap.Error(err))
 	}
 
-	stopCh := make(chan struct{})
-	if cfg.StoreInterval > 0 {
-		store.StartAutoSave(cfg.FileStoragePath, cfg.StoreInterval, stopCh)
-		defer close(stopCh)
-	}
-
-	h := handler.NewHandler(store)
+	h := handler.NewHandler(store, db, log)
 	loggedHandler := middleware.LoggingMiddleware(log)(h.Router())
 
 	log.Info("starting HTTP server", zap.String("address", cfg.ServerAddr))

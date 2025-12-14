@@ -8,6 +8,10 @@ METRICSTEST_BIN=./metricstest
 
 ITERATION ?= 1
 
+MIGRATIONS_DIR=./migrations
+GOOSE_BIN=goose
+PG_DSN=${DATABASE_DSN}
+
 .PHONY: all build test clean fmt vet lint help
 
 all: build test
@@ -26,7 +30,8 @@ test:
 		-binary-path=$(SERVER_BIN) \
 		$(if $(SOURCE_PATH),-source-path=$(SOURCE_PATH)) \
 		-server-port=${SERVER_PORT} \
-		-file-storage-path=${FILE_STORAGE_PATH}
+		-file-storage-path=${FILE_STORAGE_PATH} \
+		-database-dsn=${DATABASE_DSN}
 
 
 clean:
@@ -54,4 +59,24 @@ run-server:
 	$(SERVER_BIN) -a=localhost:8080
 
 run-agent:
-	$(AGENT_BIN) -a=http://localhost:8080 -r=10 -p=2
+	$(AGENT_BIN) -a=http://localhost:8080 -R=10 -p=2
+
+migrate-new:
+	@echo "Creating new migration: $(name)"
+	$(GOOSE_BIN) -dir $(MIGRATIONS_DIR) create $(name) sql
+	$(GOOSE_BIN) -dir $(MIGRATIONS_DIR) fix
+
+migrate-up:
+	$(GOOSE_BIN) -dir $(MIGRATIONS_DIR) postgres "$(PG_DSN)" up
+
+migrate-down:
+	$(GOOSE_BIN) -dir $(MIGRATIONS_DIR) postgres "$(PG_DSN)" down
+
+migrate-reset:
+	$(GOOSE_BIN) -dir $(MIGRATIONS_DIR) postgres "$(PG_DSN)" reset
+
+migrate-fix:
+	$(GOOSE_BIN) -dir $(MIGRATIONS_DIR) fix
+
+migrate-status:
+	$(GOOSE_BIN) -dir $(MIGRATIONS_DIR) postgres "$(PG_DSN)" status

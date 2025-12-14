@@ -42,3 +42,24 @@ git fetch template && git checkout template/v2 .github
 - **Clean Architecture**
 - **Hexagonal Architecture**
 - **Layered Architecture**
+
+# run test
+ - make test ITERATION=1 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
+ - make test ITERATION=2A SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
+ - make test ITERATION=2B SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
+ - make test ITERATION=3A SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
+ - make test ITERATION=3B SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
+ - make test ITERATION=4 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
+ - make test ITERATION=5 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
+ - make test ITERATION=6 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
+ - make test ITERATION=7 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
+ - make test ITERATION=8 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
+ - make test ITERATION=9 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
+ - make test ITERATION=10A SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json DATABASE_DSN="postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
+ - make test ITERATION=10B SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json DATABASE_DSN="postgres://postgres:postgres@localhost:15448/metrics-tpl?sslmode=disable" 
+ - make test ITERATION=11 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json DATABASE_DSN="postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
+- make test ITERATION=12 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json DATABASE_DSN="postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
+- make test ITERATION=13 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json DATABASE_DSN="postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
+
+# migration
+make migrate-down DATABASE_DSN="postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"

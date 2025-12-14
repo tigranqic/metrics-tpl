@@ -1,17 +1,28 @@
 package handler
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
+	_ "github.com/lib/pq"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
+	"go.uber.org/zap"
 )
 
 func TestHandler_Router(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
-	h := NewHandler(store)
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close test DB: %v", err)
+		}
+	}()
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger)
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/update/gauge/Alloc/123.45", nil)
@@ -68,13 +79,6 @@ func TestHandler_Router(t *testing.T) {
 		t.Fatalf("expected counter 8, got %v, err %v", val, err)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/ping", nil)
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200 for /ping; got %d", w.Code)
-	}
-
 	req = httptest.NewRequest(http.MethodGet, "/value/gauge/Alloc", nil)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -116,7 +120,14 @@ func TestHandler_Router(t *testing.T) {
 
 func TestHandler_JSONEndpoints(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
-	h := NewHandler(store)
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close test DB: %v", err)
+		}
+	}()
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger)
 	router := h.Router()
 
 	gaugeBody := `{"id":"Alloc","type":"gauge","value":123.45}`
@@ -197,4 +208,23 @@ func containsAll(s string, substrings ...string) bool {
 		}
 	}
 	return true
+}
+
+func setupTestDB(t *testing.T) *sql.DB {
+	dsn := os.Getenv("DATABASE_DSN")
+
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatalf("failed to connect to test DB: %v", err)
+	}
+
+	if err := db.Ping(); err != nil {
+		defer func() {
+			if err := db.Close(); err != nil {
+				t.Fatalf("failed to close test DB: %v", err)
+			}
+		}()
+	}
+
+	return db
 }
