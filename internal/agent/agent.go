@@ -14,6 +14,7 @@ import (
 
 	"github.com/hashicorp/go-retryablehttp"
 	models "github.com/tigranqic/metrics-tpl/internal/model"
+	"github.com/tigranqic/metrics-tpl/pkg/hashutil"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 	"go.uber.org/zap"
 )
@@ -27,6 +28,7 @@ type Agent struct {
 	ServerURL      string
 	PollInterval   time.Duration
 	ReportInterval time.Duration
+	Key            string
 
 	pollCount             int64
 	lastReportedPollCount int64
@@ -36,7 +38,7 @@ type Agent struct {
 	log     *zap.Logger
 }
 
-func NewAgent(serverURL string, pollInterval, reportInterval time.Duration) *Agent {
+func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, key string) *Agent {
 	retryClient := retryablehttp.NewClient()
 	retryClient.RetryMax = 3
 	retryClient.RetryWaitMin = 1 * time.Second
@@ -50,6 +52,7 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration) *Age
 		client:         retryClient,
 		metrics:        make(map[string]string),
 		log:            logger.Get(),
+		Key:            key,
 	}
 }
 
@@ -122,6 +125,11 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 		return fmt.Errorf("failed to marshal metric: %w", err)
 	}
 
+	var hash string
+	if a.Key != "" {
+		hash = hashutil.CalcSHA256(body, a.Key)
+	}
+
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(body); err != nil {
@@ -138,6 +146,10 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+
+	if hash != "" {
+		req.Header.Set("Hash", hash)
+	}
 
 	start := time.Now()
 	resp, err := a.client.Do(req)
@@ -178,7 +190,7 @@ func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error
 			return nil
 		}
 		if err != nil {
-			log.Debug("server health check failed", zap.Error(err))
+			log.Error("server health check failed", zap.Error(err))
 		}
 		if resp != nil {
 			_ = resp.Body.Close()
@@ -203,6 +215,11 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 		return fmt.Errorf("marshal metrics batch: %w", err)
 	}
 
+	var hash string
+	if a.Key != "" {
+		hash = hashutil.CalcSHA256(body, a.Key)
+	}
+
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(body); err != nil {
@@ -216,6 +233,9 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+	if hash != "" {
+		req.Header.Set("Hash", hash)
+	}
 
 	start := time.Now()
 	resp, err := a.client.Do(req)

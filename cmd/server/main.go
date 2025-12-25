@@ -35,7 +35,7 @@ func main() {
 		log.Fatal("failed to initialize storage", zap.Error(err))
 	}
 
-	h := handler.NewHandler(store, db, log)
+	h := handler.NewHandler(store, db, log, cfg.KEY)
 	loggedHandler := middleware.LoggingMiddleware(log)(h.Router())
 
 	log.Info("starting HTTP server", zap.String("address", cfg.ServerAddr))
