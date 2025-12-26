@@ -25,7 +25,7 @@ func main() {
 
 	log.Info("starting agent", zap.String("server", cfg.ServerAddr))
 
-	a := agent.NewAgent(cfg.ServerAddr, cfg.PollInterval, cfg.ReportInterval, cfg.KEY)
+	a := agent.NewAgent(cfg.ServerAddr, cfg.PollInterval, cfg.ReportInterval, cfg.KEY, cfg.RateLimit)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

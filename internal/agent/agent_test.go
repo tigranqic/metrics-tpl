@@ -17,7 +17,7 @@ import (
 )
 
 func TestCollectMetrics(t *testing.T) {
-	a := NewAgent("http://localhost:8080", 2, 10, "")
+	a := NewAgent("http://localhost:8080", 2, 10, "", 5)
 	a.collectMetrics()
 
 	if len(a.metrics) == 0 {
@@ -69,7 +69,7 @@ func TestSendMetric(t *testing.T) {
 	}))
 	defer server.Close()
 
-	a := NewAgent(server.URL, 2, 10, "")
+	a := NewAgent(server.URL, 2, 10, "", 5)
 	err := a.sendMetric("gauge", "Alloc", "123.45")
 	if err != nil {
 		t.Fatalf("sendMetric failed: %v", err)
@@ -111,7 +111,7 @@ func TestSendMetricRetryableHTTP(t *testing.T) {
 	}))
 	defer server.Close()
 
-	a := NewAgent(server.URL, 2*time.Second, 10*time.Second, "")
+	a := NewAgent(server.URL, 2*time.Second, 10*time.Second, "", 5)
 
 	err := a.sendMetric("gauge", "Alloc", "42")
 	if err != nil {
@@ -152,7 +152,7 @@ func TestSendBatchFallbackRetryableHTTP(t *testing.T) {
 	}))
 	defer server.Close()
 
-	a := NewAgent(server.URL, 2*time.Second, 10*time.Second, "")
+	a := NewAgent(server.URL, 2*time.Second, 10*time.Second, "", 5)
 
 	metrics := []models.Metrics{
 		{ID: "Alloc", MType: "gauge", Value: ptrFloat64(100)},
@@ -195,7 +195,7 @@ func TestSendMetricWithHash(t *testing.T) {
 	}))
 	defer server.Close()
 
-	a := NewAgent(server.URL, 2, 10, key)
+	a := NewAgent(server.URL, 2, 10, key, 5)
 
 	err := a.sendMetric("gauge", "Alloc", "123.45")
 	if err != nil {
@@ -222,7 +222,7 @@ func TestSendMetricWithoutKey_NoHash(t *testing.T) {
 	}))
 	defer server.Close()
 
-	a := NewAgent(server.URL, 2, 10, "")
+	a := NewAgent(server.URL, 2, 10, "", 5)
 
 	_ = a.sendMetric("gauge", "Alloc", "1")
 
