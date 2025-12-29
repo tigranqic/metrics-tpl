@@ -69,7 +69,6 @@ func (h *Handler) pingHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func (h *Handler) updateMetricHandler(w http.ResponseWriter, r *http.Request) {

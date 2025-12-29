@@ -20,7 +20,7 @@ type Config struct {
 	FileStoragePath string
 	Restore         bool
 	DatabaseDSN     string
-	KEY             string
+	Key             string
 	RateLimit       int
 }
 
@@ -168,7 +168,7 @@ func Load(isAgent bool) (*Config, error) {
 		FileStoragePath: fileStorage,
 		Restore:         restore,
 		DatabaseDSN:     databaseDSN,
-		KEY:             key,
+		Key:             key,
 		RateLimit:       rateLimit,
 	}, nil
 }

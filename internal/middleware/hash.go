@@ -71,7 +71,9 @@ func (m *HashMiddleware) Handle(next http.Handler) http.Handler {
 		}
 
 		w.WriteHeader(rr.status)
-		_, _ = w.Write(respBody)
+		if _, err := w.Write(respBody); err != nil {
+			m.Log.Error("failed to write response", zap.Error(err))
+		}
 	})
 }
 
