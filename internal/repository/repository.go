@@ -135,11 +135,13 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			s.log.Error("failed to rollback transaction:", zap.Error(err))
+		}
+	}()
 
-	// Для gauge берём последнюю метрику на ID
 	uniqueGauges := make(map[string]models.Metrics)
-	// Для counter суммируем дельты
 	counterSums := make(map[string]int64)
 
 	for _, m := range batch {
@@ -155,7 +157,6 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 		}
 	}
 
-	// Batch INSERT для gauge
 	if len(uniqueGauges) > 0 {
 		var placeholders []string
 		var values []interface{}
@@ -177,7 +178,6 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 		}
 	}
 
-	// Batch INSERT для counter с суммированием
 	if len(counterSums) > 0 {
 		var placeholders []string
 		var values []interface{}

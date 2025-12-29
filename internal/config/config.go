@@ -20,6 +20,8 @@ type Config struct {
 	FileStoragePath string
 	Restore         bool
 	DatabaseDSN     string
+	Key             string
+	RateLimit       int
 }
 
 const (
@@ -32,6 +34,7 @@ const (
 	DefaultFileStoragePath = "metrics.json"
 	DefaultRestore         = false
 	DefaultDBDSN           = "postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
+	DefaultRateLimit       = 5
 )
 
 func getenvInt(key string, def int) (int, bool) {
@@ -98,6 +101,8 @@ func Load(isAgent bool) (*Config, error) {
 	envFile, envFileSet := getenvString("FILE_STORAGE_PATH", DefaultFileStoragePath)
 	envRestore, envRestoreSet := getenvBool("RESTORE", DefaultRestore)
 	envDBDSN, envDBDSNSet := getenvString("DATABASE_DSN", "")
+	envKey, envKeySet := getenvString("KEY", "")
+	envRateLimit, envRateLimitSet := getenvInt("RATE_LIMIT", DefaultRateLimit)
 
 	logLevel := flag.String("log-level", DefaultLogLevel, "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", DefaultLogFormat, "Log format: text or json")
@@ -106,6 +111,9 @@ func Load(isAgent bool) (*Config, error) {
 	storeFlag := flag.Int("i", DefaultStoreInterval, "Interval in seconds to store metrics (0 = sync)")
 	fileFlag := flag.String("f", DefaultFileStoragePath, "File path for metrics storage")
 	dbDSNFlag := flag.String("d", "", "Database DSN connection string")
+	keyFlag := flag.String("k", "", "Key for hash")
+	rateLimitFlag := flag.Int("l", DefaultRateLimit, "Rate limit")
+
 	var reportFlag *int
 	var restoreFlag *bool
 	var reportVal int
@@ -132,6 +140,8 @@ func Load(isAgent bool) (*Config, error) {
 	fileStorage := chooseString(envFile, envFileSet, *fileFlag, DefaultFileStoragePath)
 	restore := chooseBool(envRestore, envRestoreSet, restoreVal, DefaultRestore)
 	databaseDSN := chooseString(envDBDSN, envDBDSNSet, *dbDSNFlag, "")
+	key := chooseString(envKey, envKeySet, *keyFlag, "")
+	rateLimit := chooseInt(envRateLimit, envRateLimitSet, *rateLimitFlag, DefaultRateLimit)
 
 	if reportInterval <= 0 {
 		return nil, errors.New("report interval must be greater than zero")
@@ -158,5 +168,7 @@ func Load(isAgent bool) (*Config, error) {
 		FileStoragePath: fileStorage,
 		Restore:         restore,
 		DatabaseDSN:     databaseDSN,
+		Key:             key,
+		RateLimit:       rateLimit,
 	}, nil
 }

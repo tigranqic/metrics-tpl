@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 
 	_ "github.com/lib/pq"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
+	"github.com/tigranqic/metrics-tpl/pkg/hashutil"
 	"go.uber.org/zap"
 )
 
@@ -22,7 +24,7 @@ func TestHandler_Router(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger)
+	h := NewHandler(store, db, logger, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/update/gauge/Alloc/123.45", nil)
@@ -127,7 +129,7 @@ func TestHandler_JSONEndpoints(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger)
+	h := NewHandler(store, db, logger, "")
 	router := h.Router()
 
 	gaugeBody := `{"id":"Alloc","type":"gauge","value":123.45}`
@@ -198,6 +200,74 @@ func TestHandler_JSONEndpoints(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected status 404 for unknown metric; got %d", w.Code)
+	}
+}
+
+func TestHandler_WithKey_InvalidHash(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	logger, _ := zap.NewDevelopment()
+
+	h := NewHandler(store, db, logger, "secret")
+	router := h.Router()
+
+	body := `{"id":"Alloc","type":"gauge","value":123.45}`
+
+	req := httptest.NewRequest(http.MethodPost, "/update/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Hash", "invalidhash")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid hash, got %d", w.Code)
+	}
+}
+
+func TestHandler_WithKey_ValidHash(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	logger, _ := zap.NewDevelopment()
+
+	key := "secret"
+	h := NewHandler(store, db, logger, key)
+	router := h.Router()
+
+	body := []byte(`{"id":"Alloc","type":"gauge","value":123.45}`)
+	hash := hashutil.CalcSHA256(body, key)
+
+	req := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Hash", hash)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid hash, got %d", w.Code)
+	}
+
+	respHash := w.Header().Get("Hash")
+	if respHash == "" {
+		t.Fatal("expected Hash in response")
+	}
+}
+
+func TestHandler_WithKey_HealthNoHash(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	logger, _ := zap.NewDevelopment()
+
+	h := NewHandler(store, db, logger, "secret")
+	router := h.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for /health, got %d", w.Code)
 	}
 }
 

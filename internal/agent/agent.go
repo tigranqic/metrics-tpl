@@ -10,10 +10,14 @@ import (
 	"net/url"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/mem"
 	models "github.com/tigranqic/metrics-tpl/internal/model"
+	"github.com/tigranqic/metrics-tpl/pkg/hashutil"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 	"go.uber.org/zap"
 )
@@ -27,6 +31,8 @@ type Agent struct {
 	ServerURL      string
 	PollInterval   time.Duration
 	ReportInterval time.Duration
+	Key            string
+	RateLimit      int
 
 	pollCount             int64
 	lastReportedPollCount int64
@@ -34,14 +40,21 @@ type Agent struct {
 
 	metrics map[string]string
 	log     *zap.Logger
+
+	sendCh chan models.Metrics
+	mu     sync.Mutex
 }
 
-func NewAgent(serverURL string, pollInterval, reportInterval time.Duration) *Agent {
+func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, key string, rateLimit int) *Agent {
 	retryClient := retryablehttp.NewClient()
 	retryClient.RetryMax = 3
 	retryClient.RetryWaitMin = 1 * time.Second
 	retryClient.RetryWaitMax = 5 * time.Second
 	retryClient.Logger = &RetryableLogger{log: logger.Get()}
+
+	if rateLimit <= 0 {
+		rateLimit = 1
+	}
 
 	return &Agent{
 		ServerURL:      serverURL,
@@ -50,12 +63,64 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration) *Age
 		client:         retryClient,
 		metrics:        make(map[string]string),
 		log:            logger.Get(),
+		Key:            key,
+		RateLimit:      rateLimit,
+		sendCh:         make(chan models.Metrics, rateLimit),
+	}
+}
+
+func (a *Agent) sendWorker(stop <-chan struct{}) {
+
+	for {
+		select {
+		case m := <-a.sendCh:
+			if err := a.sendSingle(m); err != nil {
+				a.log.Error("metric send failed", zap.Error(err))
+			}
+		case <-stop:
+			return
+		}
+	}
+}
+
+func (a *Agent) sendSingle(m models.Metrics) error {
+	if m.MType == MetricTypeGauge {
+		return a.sendMetric(MetricTypeGauge, m.ID, fmt.Sprintf("%f", *m.Value))
+	}
+	return a.sendMetric(MetricTypeCounter, m.ID, fmt.Sprintf("%d", *m.Delta))
+}
+
+func (a *Agent) collectSystemMetrics(stop <-chan struct{}) {
+	ticker := time.NewTicker(a.PollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			vm, _ := mem.VirtualMemory()
+			cpuPercents, _ := cpu.Percent(0, true)
+
+			a.mu.Lock()
+			a.metrics["TotalMemory"] = strconv.FormatFloat(float64(vm.Total), 'f', -1, 64)
+			a.metrics["FreeMemory"] = strconv.FormatFloat(float64(vm.Free), 'f', -1, 64)
+
+			for i, p := range cpuPercents {
+				name := fmt.Sprintf("CPUutilization%d", i+1)
+				a.metrics[name] = strconv.FormatFloat(p, 'f', -1, 64)
+			}
+			a.mu.Unlock()
+		case <-stop:
+			return
+		}
 	}
 }
 
 func (a *Agent) collectMetrics() {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	a.metrics["Alloc"] = strconv.FormatFloat(float64(memStats.Alloc), 'f', -1, 64)
 	a.metrics["BuckHashSys"] = strconv.FormatFloat(float64(memStats.BuckHashSys), 'f', -1, 64)
@@ -122,6 +187,11 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 		return fmt.Errorf("failed to marshal metric: %w", err)
 	}
 
+	var hash string
+	if a.Key != "" {
+		hash = hashutil.CalcSHA256(body, a.Key)
+	}
+
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(body); err != nil {
@@ -138,6 +208,10 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+
+	if hash != "" {
+		req.Header.Set("Hash", hash)
+	}
 
 	start := time.Now()
 	resp, err := a.client.Do(req)
@@ -178,7 +252,7 @@ func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error
 			return nil
 		}
 		if err != nil {
-			log.Debug("server health check failed", zap.Error(err))
+			log.Error("server health check failed", zap.Error(err))
 		}
 		if resp != nil {
 			_ = resp.Body.Close()
@@ -203,6 +277,11 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 		return fmt.Errorf("marshal metrics batch: %w", err)
 	}
 
+	var hash string
+	if a.Key != "" {
+		hash = hashutil.CalcSHA256(body, a.Key)
+	}
+
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(body); err != nil {
@@ -216,6 +295,9 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+	if hash != "" {
+		req.Header.Set("Hash", hash)
+	}
 
 	start := time.Now()
 	resp, err := a.client.Do(req)
@@ -271,7 +353,11 @@ func (a *Agent) Run(stop <-chan struct{}) {
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
-	a.collectMetrics()
+	for i := 0; i < a.RateLimit; i++ {
+		go a.sendWorker(stop)
+	}
+
+	go a.collectSystemMetrics(stop)
 
 	for {
 		select {
@@ -280,40 +366,32 @@ func (a *Agent) Run(stop <-chan struct{}) {
 			a.collectMetrics()
 
 		case <-reportTicker.C:
-			a.log.Debug("sending metrics batch", zap.Int("count", len(a.metrics)))
+			a.log.Debug("sending metrics")
 
-			var batch []models.Metrics
+			var snapshot []models.Metrics
 
+			a.mu.Lock()
 			for name, val := range a.metrics {
 				var m models.Metrics
 				m.ID = name
 
 				if name == "PollCount" {
 					m.MType = MetricTypeCounter
-					v, err := strconv.ParseInt(val, 10, 64)
-					if err != nil {
-						a.log.Error("failed to parse int metric", zap.String("metric", name), zap.String("value", val), zap.Error(err))
-						continue
-					}
+					v, _ := strconv.ParseInt(val, 10, 64)
 					m.Delta = &v
 				} else {
 					m.MType = MetricTypeGauge
-					vF, err := strconv.ParseFloat(val, 64)
-					if err != nil {
-						a.log.Error("failed to parse float metric", zap.String("metric", name), zap.String("value", val), zap.Error(err))
-						continue
-					}
-					m.Value = &vF
+					v, _ := strconv.ParseFloat(val, 64)
+					m.Value = &v
 				}
-
-				batch = append(batch, m)
+				snapshot = append(snapshot, m)
 			}
-
-			if err := a.sendBatch(batch); err != nil {
-				a.log.Error("failed to send batch", zap.Error(err))
-			}
-
 			a.lastReportedPollCount = a.pollCount
+			a.mu.Unlock()
+
+			for _, m := range snapshot {
+				a.sendCh <- m
+			}
 
 		case <-stop:
 			a.log.Info("agent stopped gracefully")

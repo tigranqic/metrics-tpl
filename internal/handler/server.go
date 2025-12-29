@@ -23,13 +23,15 @@ type Handler struct {
 	store repository.Storage
 	db    *sql.DB
 	log   *zap.Logger
+	key   string
 }
 
-func NewHandler(store repository.Storage, db *sql.DB, log *zap.Logger) *Handler {
+func NewHandler(store repository.Storage, db *sql.DB, log *zap.Logger, key string) *Handler {
 	return &Handler{
 		store: store,
 		db:    db,
 		log:   log,
+		key:   key,
 	}
 }
 
@@ -37,6 +39,7 @@ func (h *Handler) Router() http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.GzipDecompress)
+	r.Use(middleware.NewHashMiddleware(h.key, h.log).Handle)
 	r.Use(middleware.GzipCompress)
 
 	r.Get("/", h.listMetricsHandler)
@@ -64,6 +67,7 @@ func (h *Handler) pingHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 }
 

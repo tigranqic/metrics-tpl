@@ -31,7 +31,8 @@ test:
 		$(if $(SOURCE_PATH),-source-path=$(SOURCE_PATH)) \
 		-server-port=${SERVER_PORT} \
 		-file-storage-path=${FILE_STORAGE_PATH} \
-		-database-dsn=${DATABASE_DSN}
+		-database-dsn=${DATABASE_DSN} \
+		-key=${KEY}
 
 
 clean:

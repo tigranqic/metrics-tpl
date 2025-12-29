@@ -12,11 +12,12 @@ import (
 	"time"
 
 	models "github.com/tigranqic/metrics-tpl/internal/model"
+	"github.com/tigranqic/metrics-tpl/pkg/hashutil"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 )
 
 func TestCollectMetrics(t *testing.T) {
-	a := NewAgent("http://localhost:8080", 2, 10)
+	a := NewAgent("http://localhost:8080", 2, 10, "", 5)
 	a.collectMetrics()
 
 	if len(a.metrics) == 0 {
@@ -68,7 +69,7 @@ func TestSendMetric(t *testing.T) {
 	}))
 	defer server.Close()
 
-	a := NewAgent(server.URL, 2, 10)
+	a := NewAgent(server.URL, 2, 10, "", 5)
 	err := a.sendMetric("gauge", "Alloc", "123.45")
 	if err != nil {
 		t.Fatalf("sendMetric failed: %v", err)
@@ -110,7 +111,7 @@ func TestSendMetricRetryableHTTP(t *testing.T) {
 	}))
 	defer server.Close()
 
-	a := NewAgent(server.URL, 2*time.Second, 10*time.Second)
+	a := NewAgent(server.URL, 2*time.Second, 10*time.Second, "", 5)
 
 	err := a.sendMetric("gauge", "Alloc", "42")
 	if err != nil {
@@ -151,7 +152,7 @@ func TestSendBatchFallbackRetryableHTTP(t *testing.T) {
 	}))
 	defer server.Close()
 
-	a := NewAgent(server.URL, 2*time.Second, 10*time.Second)
+	a := NewAgent(server.URL, 2*time.Second, 10*time.Second, "", 5)
 
 	metrics := []models.Metrics{
 		{ID: "Alloc", MType: "gauge", Value: ptrFloat64(100)},
@@ -165,6 +166,68 @@ func TestSendBatchFallbackRetryableHTTP(t *testing.T) {
 
 	if len(sentMetrics) != 2 {
 		t.Errorf("expected 2 metrics sent individually, got %d", len(sentMetrics))
+	}
+}
+
+func TestSendMetricWithHash(t *testing.T) {
+	const key = "secret"
+
+	var gotHash string
+	var gotBody []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHash = r.Header.Get("Hash")
+
+		var body []byte
+		if r.Header.Get("Content-Encoding") == "gzip" {
+			gz, err := gzip.NewReader(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ = io.ReadAll(gz)
+			_ = gz.Close()
+		} else {
+			body, _ = io.ReadAll(r.Body)
+		}
+
+		gotBody = body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewAgent(server.URL, 2, 10, key, 5)
+
+	err := a.sendMetric("gauge", "Alloc", "123.45")
+	if err != nil {
+		t.Fatalf("sendMetric failed: %v", err)
+	}
+
+	expectedHash := hashutil.CalcSHA256(gotBody, key)
+
+	if gotHash == "" {
+		t.Fatal("expected Hash header to be set")
+	}
+
+	if gotHash != expectedHash {
+		t.Fatalf("invalid hash: expected %s, got %s", expectedHash, gotHash)
+	}
+}
+
+func TestSendMetricWithoutKey_NoHash(t *testing.T) {
+	var gotHash string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHash = r.Header.Get("Hash")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewAgent(server.URL, 2, 10, "", 5)
+
+	_ = a.sendMetric("gauge", "Alloc", "1")
+
+	if gotHash != "" {
+		t.Errorf("did not expect Hash header, got %s", gotHash)
 	}
 }
 
