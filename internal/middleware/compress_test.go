@@ -13,7 +13,10 @@ import (
 
 func TestGzipCompress_WritesCompressed(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("hello gzip"))
+		_, err := w.Write([]byte("hello gzip"))
+		if err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -26,8 +29,11 @@ func TestGzipCompress_WritesCompressed(t *testing.T) {
 
 	gr, err := gzip.NewReader(rec.Body)
 	assert.NoError(t, err)
-	defer gr.Close()
-
+	defer func() {
+		if err := gr.Close(); err != nil {
+			t.Fatalf("failed to close gzip reader: %v", err)
+		}
+	}()
 	body, err := io.ReadAll(gr)
 	assert.NoError(t, err)
 	assert.Equal(t, "hello gzip", string(body))
@@ -35,7 +41,10 @@ func TestGzipCompress_WritesCompressed(t *testing.T) {
 
 func TestGzipCompress_SkipsWithoutAcceptEncoding(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("plain body"))
+		_, err := w.Write([]byte("plain body"))
+		if err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -55,7 +64,10 @@ func TestGzipDecompress_HandlesGzip(t *testing.T) {
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		w.Write(body)
+		_, err := w.Write(body)
+		if err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/", &buf)
@@ -70,7 +82,10 @@ func TestGzipDecompress_HandlesGzip(t *testing.T) {
 func TestGzipDecompress_PassesThroughNonGzip(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		w.Write(body)
+		_, err := w.Write(body)
+		if err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("plain request"))
@@ -83,7 +98,11 @@ func TestGzipDecompress_PassesThroughNonGzip(t *testing.T) {
 
 func TestGzipDecompress_InvalidGzip(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("should not reach"))
+		_, err := w.Write([]byte("should not reach"))
+		if err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
+
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("invalid gzip"))

@@ -18,7 +18,10 @@ func TestHashMiddleware_SkipsIfNoKey(t *testing.T) {
 	handlerCalled := false
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
-		w.Write([]byte("ok"))
+		_, err := w.Write([]byte("ok"))
+		if err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader("body"))
@@ -34,7 +37,10 @@ func TestHashMiddleware_SkipsIfNoKey(t *testing.T) {
 func TestHashMiddleware_RejectsInvalidHash(t *testing.T) {
 	logger := zap.NewNop()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, err := w.Write([]byte("ok"))
+		if err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader("body"))
@@ -51,7 +57,10 @@ func TestHashMiddleware_RejectsInvalidHash(t *testing.T) {
 func TestHashMiddleware_AllowsCorrectHash(t *testing.T) {
 	logger := zap.NewNop()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, err := w.Write([]byte("ok"))
+		if err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	})
 
 	body := []byte("body")
@@ -72,7 +81,10 @@ func TestHashMiddleware_AllowsCorrectHash(t *testing.T) {
 func TestHashMiddleware_SetsResponseHash(t *testing.T) {
 	logger := zap.NewNop()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("response"))
+		_, err := w.Write([]byte("response"))
+		if err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -91,7 +103,10 @@ func TestHashMiddleware_BypassHashNone(t *testing.T) {
 	handlerCalled := false
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
-		w.Write([]byte("ok"))
+		_, err := w.Write([]byte("ok"))
+		if err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader("body"))
@@ -108,7 +123,10 @@ func TestHashMiddleware_BypassHashNone(t *testing.T) {
 func TestHashMiddleware_ReadBodyError(t *testing.T) {
 	logger := zap.NewNop()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, err := w.Write([]byte("ok"))
+		if err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/test", errorReader{})

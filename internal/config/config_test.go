@@ -44,8 +44,8 @@ func TestEnvOverridesFlags(t *testing.T) {
 	resetFlags()
 	clearEnv()
 
-	os.Setenv("ADDRESS", "env-host:9999")
-	os.Setenv("POLL_INTERVAL", "5")
+	require.NoError(t, os.Setenv("ADDRESS", "env-host:9999"))
+	require.NoError(t, os.Setenv("POLL_INTERVAL", "5"))
 
 	os.Args = []string{
 		"cmd",
@@ -64,7 +64,7 @@ func TestAgentAddsHTTPPrefix(t *testing.T) {
 	resetFlags()
 	clearEnv()
 
-	os.Setenv("ADDRESS", "localhost:1234")
+	require.NoError(t, os.Setenv("ADDRESS", "localhost:1234"))
 
 	cfg, err := Load(true)
 	require.NoError(t, err)
@@ -76,7 +76,7 @@ func TestServerStripsHTTPPrefix(t *testing.T) {
 	resetFlags()
 	clearEnv()
 
-	os.Setenv("ADDRESS", "http://localhost:8080")
+	require.NoError(t, os.Setenv("ADDRESS", "localhost:8080"))
 
 	cfg, err := Load(false)
 	require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestRateLimitFromEnv(t *testing.T) {
 	resetFlags()
 	clearEnv()
 
-	os.Setenv("RATE_LIMIT", "10")
+	require.NoError(t, os.Setenv("RATE_LIMIT", "10"))
 
 	cfg, err := Load(true)
 	require.NoError(t, err)
@@ -100,8 +100,8 @@ func TestAuditConfigFromEnv(t *testing.T) {
 	resetFlags()
 	clearEnv()
 
-	os.Setenv("AUDIT_FILE", "/tmp/audit.log")
-	os.Setenv("AUDIT_URL", "http://audit")
+	require.NoError(t, os.Setenv("AUDIT_FILE", "/tmp/audit.log"))
+	require.NoError(t, os.Setenv("AUDIT_URL", "http://audit"))
 
 	cfg, err := Load(true)
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestKeyFromEnv(t *testing.T) {
 	resetFlags()
 	clearEnv()
 
-	os.Setenv("KEY", "super-secret")
+	require.NoError(t, os.Setenv("KEY", "super-secret"))
 
 	cfg, err := Load(true)
 	require.NoError(t, err)

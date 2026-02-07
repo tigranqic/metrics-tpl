@@ -274,7 +274,11 @@ func TestHandler_WithKey_HealthNoHash(t *testing.T) {
 func TestHandler_Ping(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "secret", nil)
 	router := h.Router()
@@ -303,7 +307,11 @@ func TestHandler_Ping(t *testing.T) {
 func TestHandler_UpdateMetricsBatch_Empty(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil)
 	router := h.Router()
@@ -321,7 +329,11 @@ func TestHandler_UpdateMetricsBatch_Empty(t *testing.T) {
 func TestHandler_UpdateMetricsBatch_InvalidJSON(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil)
 	router := h.Router()
@@ -339,7 +351,11 @@ func TestHandler_UpdateMetricsBatch_InvalidJSON(t *testing.T) {
 func TestHandler_UpdateMetricJSON_InvalidType(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil)
 	router := h.Router()
@@ -358,7 +374,11 @@ func TestHandler_UpdateMetricJSON_InvalidType(t *testing.T) {
 func TestHandler_ConcurrentCounterUpdates(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil)
 	router := h.Router()
@@ -389,7 +409,11 @@ func TestHandler_ConcurrentCounterUpdates(t *testing.T) {
 func TestHandler_BatchUpdate_ValidMetrics(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil)
 	router := h.Router()
@@ -415,7 +439,9 @@ func TestHandler_BatchUpdate_ValidMetrics(t *testing.T) {
 func TestHandler_Ping_ClosedDB(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	db.Close()
+	if err := db.Close(); err != nil {
+		t.Fatalf("failed to close test db: %v", err)
+	}
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil)
 	router := h.Router()
@@ -432,7 +458,11 @@ func TestHandler_Ping_ClosedDB(t *testing.T) {
 func TestHandler_Index_EmptyStore(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil)
 	router := h.Router()

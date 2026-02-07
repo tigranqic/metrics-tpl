@@ -31,6 +31,7 @@ func TestMemStorage_UpdateAndGetCounter(t *testing.T) {
 	assert.NoError(t, err)
 
 	val, err = store.GetCounter("c1")
+	assert.NoError(t, err)
 	assert.Equal(t, int64(15), val)
 }
 
@@ -72,8 +73,11 @@ func TestMemStorage_UpdateBatch(t *testing.T) {
 
 func TestMemStorage_SaveAndLoadFile(t *testing.T) {
 	tmpFile := "test_metrics.json"
-	defer os.Remove(tmpFile)
-
+	defer func() {
+		if err := os.Remove(tmpFile); err != nil {
+			t.Fatalf("failed to remove temp file: %v", err)
+		}
+	}()
 	store := NewMemStorage(tmpFile, 0)
 	_ = store.Update(models.Gauge, "g1", "1.1")
 	_ = store.Update(models.Counter, "c1", "5")
@@ -98,8 +102,11 @@ func TestMemStorage_LoadFileNotExist(t *testing.T) {
 
 func TestMemStorage_StartAutoSaveImmediate(t *testing.T) {
 	tmpFile := "test_auto.json"
-	defer os.Remove(tmpFile)
-
+	defer func() {
+		if err := os.Remove(tmpFile); err != nil {
+			t.Fatalf("failed to remove temp file: %v", err)
+		}
+	}()
 	store := NewMemStorage(tmpFile, 0)
 	_ = store.Update(models.Gauge, "g1", "1.1")
 
