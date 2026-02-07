@@ -46,8 +46,8 @@ func main() {
 		observers = append(observers, fo)
 	}
 
-	if cfg.AuditUrl != "" {
-		observers = append(observers, audit.NewHTTPObserver(cfg.AuditUrl))
+	if cfg.AuditURL != "" {
+		observers = append(observers, audit.NewHTTPObserver(cfg.AuditURL))
 	}
 
 	var auditPublisher *audit.Publisher

@@ -23,7 +23,7 @@ type Config struct {
 	Key             string
 	RateLimit       int
 	AuditFile       string
-	AuditUrl        string
+	AuditURL        string
 }
 
 const (
@@ -106,7 +106,7 @@ func Load(isAgent bool) (*Config, error) {
 	envKey, envKeySet := getenvString("KEY", "")
 	envRateLimit, envRateLimitSet := getenvInt("RATE_LIMIT", DefaultRateLimit)
 	envAuditFile, envAuditFileSet := getenvString("AUDIT_FILE", "")
-	envAuditUrl, envAuditUrlSet := getenvString("AUDIT_URL", "")
+	envAuditURL, envAuditURLSet := getenvString("AUDIT_URL", "")
 
 	logLevel := flag.String("log-level", DefaultLogLevel, "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", DefaultLogFormat, "Log format: text or json")
@@ -118,7 +118,7 @@ func Load(isAgent bool) (*Config, error) {
 	keyFlag := flag.String("k", "", "Key for hash")
 	rateLimitFlag := flag.Int("l", DefaultRateLimit, "Rate limit")
 	auditFileFlag := flag.String("audit-file", "", "file to write audit")
-	auditUrlFlag := flag.String("audit-url", "", "url to send audit")
+	auditURLFlag := flag.String("audit-url", "", "url to send audit")
 
 	var reportFlag *int
 	var restoreFlag *bool
@@ -149,7 +149,7 @@ func Load(isAgent bool) (*Config, error) {
 	key := chooseString(envKey, envKeySet, *keyFlag, "")
 	rateLimit := chooseInt(envRateLimit, envRateLimitSet, *rateLimitFlag, DefaultRateLimit)
 	auditFile := chooseString(envAuditFile, envAuditFileSet, *auditFileFlag, "")
-	auditUrl := chooseString(envAuditUrl, envAuditUrlSet, *auditUrlFlag, "")
+	auditURL := chooseString(envAuditURL, envAuditURLSet, *auditURLFlag, "")
 
 	if reportInterval <= 0 {
 		return nil, errors.New("report interval must be greater than zero")
@@ -179,6 +179,6 @@ func Load(isAgent bool) (*Config, error) {
 		Key:             key,
 		RateLimit:       rateLimit,
 		AuditFile:       auditFile,
-		AuditUrl:        auditUrl,
+		AuditURL:        auditURL,
 	}, nil
 }

@@ -12,6 +12,8 @@ MIGRATIONS_DIR=./migrations
 GOOSE_BIN=goose
 PG_DSN=${DATABASE_DSN}
 
+STATICTEST_BIN=./statictest-darwin-arm64
+
 .PHONY: all build test clean fmt vet lint help
 
 all: build test
@@ -41,8 +43,19 @@ clean:
 fmt:
 	go fmt ./...
 
-vet:
-	go vet ./...
+download-statictest:
+	@if [ ! -f $(STATICTEST_BIN) ]; then \
+		echo "statictest binary not found. Downloading..."; \
+		@mkdir -p .tools; \
+		curl -sSL https://github.com/Yandex-Practicum/go-autotests/releases/latest/download/statictest-darwin-arm64 -o $(STATICTEST_BIN); \
+		chmod +x $(STATICTEST_BIN); \
+	else \
+		echo "Using local statictest binary..."; \
+	fi
+
+vet: download-statictest
+	@echo "Running go vet with statictest..."
+	go vet -vettool=$(STATICTEST_BIN) ./...
 
 lint:
 	golangci-lint run

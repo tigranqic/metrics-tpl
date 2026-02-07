@@ -107,7 +107,7 @@ func TestAuditConfigFromEnv(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "/tmp/audit.log", cfg.AuditFile)
-	assert.Equal(t, "http://audit", cfg.AuditUrl)
+	assert.Equal(t, "http://audit", cfg.AuditURL)
 }
 
 func TestKeyFromEnv(t *testing.T) {
