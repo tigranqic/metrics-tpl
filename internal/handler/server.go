@@ -4,7 +4,10 @@ import (
 	"html/template"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
+	"github.com/tigranqic/metrics-tpl/internal/audit"
 	"github.com/tigranqic/metrics-tpl/internal/middleware"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
 	"go.uber.org/zap"
@@ -24,14 +27,22 @@ type Handler struct {
 	db    *sql.DB
 	log   *zap.Logger
 	key   string
+	Audit *audit.Publisher
 }
 
-func NewHandler(store repository.Storage, db *sql.DB, log *zap.Logger, key string) *Handler {
+func NewHandler(
+	store repository.Storage,
+	db *sql.DB,
+	log *zap.Logger,
+	key string,
+	auditPublisher *audit.Publisher,
+) *Handler {
 	return &Handler{
 		store: store,
 		db:    db,
 		log:   log,
 		key:   key,
+		Audit: auditPublisher,
 	}
 }
 
@@ -58,7 +69,7 @@ func (h *Handler) Router() http.Handler {
 
 func (h *Handler) pingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.Ping(); err != nil {
-		h.log.Error("DB connection erro (pingHandler)", zap.Error(err))
+		h.log.Error("DB connection error (pingHandler)", zap.Error(err))
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -108,6 +119,8 @@ func (h *Handler) updateMetricHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+
+	h.NotifyAudit(r, []string{name})
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -175,6 +188,13 @@ func (h *Handler) updateMetricsBatchHandler(w http.ResponseWriter, r *http.Reque
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+
+	names := make([]string, 0, len(metrics))
+	for _, m := range metrics {
+		names = append(names, m.ID)
+	}
+
+	h.NotifyAudit(r, names)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -288,6 +308,7 @@ func (h *Handler) updateMetricJSONHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	h.NotifyAudit(r, []string{m.ID})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -335,4 +356,17 @@ func (h *Handler) getMetricValueJSONHandler(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) NotifyAudit(r *http.Request, metrics []string) {
+	ip := strings.Split(r.RemoteAddr, ":")[0]
+	event := audit.Event{
+		Timestamp: time.Now().Unix(),
+		Metrics:   metrics,
+		IPAddress: ip,
+	}
+
+	if h.Audit != nil {
+		h.Audit.NotifyAllAsync(event)
+	}
 }

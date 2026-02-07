@@ -7,6 +7,7 @@ import (
 
 	_ "github.com/lib/pq"
 
+	"github.com/tigranqic/metrics-tpl/internal/audit"
 	"github.com/tigranqic/metrics-tpl/internal/config"
 	"github.com/tigranqic/metrics-tpl/internal/handler"
 	"github.com/tigranqic/metrics-tpl/internal/middleware"
@@ -35,7 +36,26 @@ func main() {
 		log.Fatal("failed to initialize storage", zap.Error(err))
 	}
 
-	h := handler.NewHandler(store, db, log, cfg.Key)
+	var observers []audit.Observer
+
+	if cfg.AuditFile != "" {
+		fo, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			log.Fatal("failed to init file audit observer", zap.Error(err))
+		}
+		observers = append(observers, fo)
+	}
+
+	if cfg.AuditUrl != "" {
+		observers = append(observers, audit.NewHTTPObserver(cfg.AuditUrl))
+	}
+
+	var auditPublisher *audit.Publisher
+	if len(observers) > 0 {
+		auditPublisher = audit.NewPublisherWithPool(log, observers, 3)
+	}
+
+	h := handler.NewHandler(store, db, log, cfg.Key, auditPublisher)
 	loggedHandler := middleware.LoggingMiddleware(log)(h.Router())
 
 	log.Info("starting HTTP server", zap.String("address", cfg.ServerAddr))

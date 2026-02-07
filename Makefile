@@ -57,10 +57,10 @@ help:
 	@echo "  make lint            - Run golangci-lint (optional)"
 
 run-server:
-	$(SERVER_BIN) -a=localhost:8080
+	$(SERVER_BIN) -a=localhost:8080 --audit-file=audit
 
 run-agent:
-	$(AGENT_BIN) -a=http://localhost:8080 -R=10 -p=2
+	$(AGENT_BIN) -a=http://localhost:8080 -r=10 -p=2
 
 migrate-new:
 	@echo "Creating new migration: $(name)"
@@ -81,3 +81,6 @@ migrate-fix:
 
 migrate-status:
 	$(GOOSE_BIN) -dir $(MIGRATIONS_DIR) postgres "$(PG_DSN)" status
+
+cover:
+	./covertest-darwin-arm64 ./...

@@ -27,3 +27,7 @@ vendor/
 metricstest
 metricstest-darwin-arm64
 metricstest_v2-darwin-arm64
+
+covertest
+covertest-darwin-arm64
+audit

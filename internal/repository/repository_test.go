@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"regexp"
 	"strconv"
 	"testing"
@@ -237,4 +238,102 @@ func TestPostgresStorage_UpdateBatchWithRetry(t *testing.T) {
 
 	assert.Equal(t, 10.1, mock.records["g1"])
 	assert.Equal(t, int64(5), mock.records["c1"])
+}
+
+func TestPostgresStorage_Update_InvalidGauge(t *testing.T) {
+	store, _, _ := newTestStorage(t)
+	err := store.Update(models.Gauge, "g1", "not-a-number")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse gauge metric")
+}
+
+func TestPostgresStorage_Update_InvalidCounter(t *testing.T) {
+	store, _, _ := newTestStorage(t)
+	err := store.Update(models.Counter, "c1", "NaN")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse counter metric")
+}
+
+func TestPostgresStorage_Update_UnsupportedMetric(t *testing.T) {
+	store, _, _ := newTestStorage(t)
+	err := store.Update("unsupported", "m1", "123")
+	assert.Error(t, err)
+	assert.Equal(t, "unsupported metric type", err.Error())
+}
+
+func TestPostgresStorage_GetGauge_NotFound(t *testing.T) {
+	store, mock, _ := newTestStorage(t)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM metrics WHERE id=$1 AND mtype='gauge'`)).
+		WithArgs("missing").
+		WillReturnError(sql.ErrNoRows)
+
+	_, err := store.GetGauge("missing")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get gauge metric")
+}
+
+func TestPostgresStorage_GetCounter_NotFound(t *testing.T) {
+	store, mock, _ := newTestStorage(t)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT delta FROM metrics WHERE id=$1 AND mtype='counter'`)).
+		WithArgs("missing").
+		WillReturnError(sql.ErrNoRows)
+
+	_, err := store.GetCounter("missing")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get counter metric")
+}
+
+func TestPostgresStorage_GetAll_QueryError(t *testing.T) {
+	store, mock, _ := newTestStorage(t)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, mtype, delta, value FROM metrics`)).
+		WillReturnError(sql.ErrConnDone)
+
+	_, err := store.GetAll()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to query all metrics")
+}
+
+func TestPostgresStorage_GetAll_ScanError(t *testing.T) {
+	store, mock, _ := newTestStorage(t)
+	rows := sqlmock.NewRows([]string{"id", "mtype", "delta", "value"}).
+		AddRow(nil, nil, nil, nil)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, mtype, delta, value FROM metrics`)).
+		WillReturnRows(rows)
+
+	result, err := store.GetAll()
+	assert.NoError(t, err)
+	assert.Len(t, result, 0)
+}
+
+func TestPostgresStorage_UpdateBatch_Empty(t *testing.T) {
+	store, _, _ := newTestStorage(t)
+	err := store.UpdateBatch([]models.Metrics{})
+	assert.NoError(t, err)
+}
+
+func TestPostgresStorage_UpdateBatch_ExecError(t *testing.T) {
+	store, mock, _ := newTestStorage(nil)
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO metrics`)).
+		WillReturnError(fmt.Errorf("exec failed"))
+	mock.ExpectRollback()
+
+	batch := []models.Metrics{
+		{ID: "g1", MType: models.Gauge, Value: ptrFloat64(1.1)},
+	}
+
+	err := store.UpdateBatch(batch)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to update gauge batch")
+}
+
+func TestExecWithRetry_FailsAfterMaxAttempts(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	mock := &mockDB{
+		failures: 5,
+		records:  make(map[string]any),
+	}
+
+	err := ExecWithRetry(context.Background(), mock, logger, "INSERT ...", "g1", 42.5)
+	assert.Error(t, err)
 }
