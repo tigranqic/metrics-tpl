@@ -196,25 +196,24 @@ func (s *MemStorage) UpdateBatch(batch []models.Metrics) error {
 			if m.Value == nil {
 				continue
 			}
-			v := *m.Value
 			s.metrics[m.ID] = &models.Metrics{
 				ID:    m.ID,
 				MType: models.Gauge,
-				Value: &v,
+				Value: m.Value,
 			}
 
 		case models.Counter:
 			if m.Delta == nil {
 				continue
 			}
-			d := *m.Delta
+			newDelta := *m.Delta
 			if ex, ok := s.metrics[m.ID]; ok && ex.Delta != nil {
-				d += *ex.Delta
+				newDelta += *ex.Delta
 			}
 			s.metrics[m.ID] = &models.Metrics{
 				ID:    m.ID,
 				MType: models.Counter,
-				Delta: &d,
+				Delta: &newDelta,
 			}
 		}
 	}

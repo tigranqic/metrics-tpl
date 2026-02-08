@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+
+	_ "net/http/pprof"
 
 	"github.com/tigranqic/metrics-tpl/internal/agent"
 	"github.com/tigranqic/metrics-tpl/internal/config"
@@ -31,6 +34,14 @@ func main() {
 	defer stop()
 
 	agentStop := make(chan struct{})
+
+	go func() {
+		log.Info("starting pprof server", zap.String("address", "localhost:6060"))
+		err := http.ListenAndServe(":6060", nil)
+		if err != nil {
+			log.Error("pprof server failed", zap.Error(err))
+		}
+	}()
 
 	go a.Run(agentStop)
 

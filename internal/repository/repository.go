@@ -158,8 +158,8 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 	}
 
 	if len(uniqueGauges) > 0 {
-		var placeholders []string
-		var values []interface{}
+		placeholders := make([]string, 0, len(uniqueGauges))
+		values := make([]interface{}, 0, len(uniqueGauges)*2)
 		i := 1
 		for _, m := range uniqueGauges {
 			placeholders = append(placeholders, fmt.Sprintf("($%d, 'gauge', $%d)", i, i+1))
@@ -179,8 +179,8 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 	}
 
 	if len(counterSums) > 0 {
-		var placeholders []string
-		var values []interface{}
+		placeholders := make([]string, 0, len(counterSums))
+		values := make([]interface{}, 0, len(counterSums)*2)
 		i := 1
 		for id, delta := range counterSums {
 			placeholders = append(placeholders, fmt.Sprintf("($%d, 'counter', $%d)", i, i+1))

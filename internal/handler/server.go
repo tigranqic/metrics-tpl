@@ -212,7 +212,7 @@ func (h *Handler) listMetricsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	var metrics []Metric
+	metrics := make([]Metric, 0, len(all))
 
 	for _, m := range all {
 		switch m.MType {

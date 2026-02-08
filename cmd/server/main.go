@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 
+	_ "net/http/pprof"
+
 	_ "github.com/lib/pq"
 
 	"github.com/tigranqic/metrics-tpl/internal/audit"
@@ -57,6 +59,13 @@ func main() {
 
 	h := handler.NewHandler(store, db, log, cfg.Key, auditPublisher)
 	loggedHandler := middleware.LoggingMiddleware(log)(h.Router())
+
+	go func() {
+		log.Info("starting pprof server", zap.String("address", "localhost:6060"))
+		if err := http.ListenAndServe(":6065", nil); err != nil {
+			log.Error("pprof server failed", zap.Error(err))
+		}
+	}()
 
 	log.Info("starting HTTP server", zap.String("address", cfg.ServerAddr))
 
