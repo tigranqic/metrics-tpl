@@ -29,6 +29,19 @@ func NewPublisherWithPool(log *zap.Logger, observers []Observer, poolSize int) *
 	return p
 }
 
+func (p *Publisher) NotifyAllAsync(event Event) {
+	select {
+	case p.JobCh <- event:
+	default:
+		p.log.Warn("audit queue full, dropping event")
+	}
+}
+
+func (p *Publisher) Shutdown() {
+	p.cancel()
+	close(p.JobCh)
+}
+
 func (p *Publisher) worker(ctx context.Context) {
 	for {
 		select {
@@ -42,17 +55,4 @@ func (p *Publisher) worker(ctx context.Context) {
 			}
 		}
 	}
-}
-
-func (p *Publisher) NotifyAllAsync(event Event) {
-	select {
-	case p.JobCh <- event:
-	default:
-		p.log.Warn("audit queue full, dropping event")
-	}
-}
-
-func (p *Publisher) Shutdown() {
-	p.cancel()
-	close(p.JobCh)
 }

@@ -97,3 +97,31 @@ migrate-status:
 
 cover:
 	./covertest-darwin-arm64 ./...
+
+check-fmt:
+	@echo "Checking code formatting with gofmt..."
+	@if [ -n "$$(gofmt -l .)" ]; then \
+		echo "The following files are not properly formatted:"; \
+		gofmt -l .; \
+		exit 1; \
+	else \
+		echo "All files are properly formatted."; \
+	fi
+
+check-imports:
+	@echo "Checking imports with goimports..."
+	@if [ -n "$$(goimports -l .)" ]; then \
+		echo "The following files have import issues:"; \
+		goimports -l .; \
+		exit 1; \
+	else \
+		echo "All imports are correct."; \
+	fi
+
+check: check-fmt check-imports
+	@echo "Code formatting and imports are OK ✅"
+
+fmt-all:
+	gofmt -w .
+	goimports -w .
+	@echo "Code and imports formatted ✅"

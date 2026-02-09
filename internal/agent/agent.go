@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -66,6 +67,67 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, key 
 		Key:            key,
 		RateLimit:      rateLimit,
 		sendCh:         make(chan models.Metrics, rateLimit),
+	}
+}
+
+func (a *Agent) Run(stop <-chan struct{}) {
+	a.log.Info("starting agent loop", zap.String("server", a.ServerURL))
+
+	if err := waitForServer(a.ServerURL, 10*time.Second, a.log); err != nil {
+		a.log.Error("server not available", zap.String("url", a.ServerURL), zap.Error(err))
+		return
+	}
+
+	pollTicker := time.NewTicker(a.PollInterval)
+	reportTicker := time.NewTicker(a.ReportInterval)
+
+	defer pollTicker.Stop()
+	defer reportTicker.Stop()
+
+	for i := 0; i < a.RateLimit; i++ {
+		go a.sendWorker(stop)
+	}
+
+	go a.collectSystemMetrics(stop)
+
+	for {
+		select {
+		case <-pollTicker.C:
+			a.log.Debug("collecting metrics")
+			a.collectMetrics()
+
+		case <-reportTicker.C:
+			a.log.Debug("sending metrics")
+
+			var snapshot []models.Metrics
+
+			a.mu.Lock()
+			for name, val := range a.metrics {
+				var m models.Metrics
+				m.ID = name
+
+				if name == "PollCount" {
+					m.MType = MetricTypeCounter
+					v, _ := strconv.ParseInt(val, 10, 64)
+					m.Delta = &v
+				} else {
+					m.MType = MetricTypeGauge
+					v, _ := strconv.ParseFloat(val, 64)
+					m.Value = &v
+				}
+				snapshot = append(snapshot, m)
+			}
+			a.lastReportedPollCount = a.pollCount
+			a.mu.Unlock()
+
+			for _, m := range snapshot {
+				a.sendCh <- m
+			}
+
+		case <-stop:
+			a.log.Info("agent stopped gracefully")
+			return
+		}
 	}
 }
 
@@ -238,31 +300,6 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 	return nil
 }
 
-func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error {
-	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 2 * time.Second}
-
-	log.Info("waiting for server", zap.String("url", baseURL), zap.Duration("timeout", timeout))
-
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(baseURL + "/health")
-		if err == nil && resp.StatusCode == http.StatusOK {
-			_ = resp.Body.Close()
-			log.Info("server is ready", zap.String("url", baseURL))
-			return nil
-		}
-		if err != nil {
-			log.Error("server health check failed", zap.Error(err))
-		}
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	return fmt.Errorf("server %s not responding within %s", baseURL, timeout)
-}
-
 func (a *Agent) sendBatch(metrics []models.Metrics) error {
 	if len(metrics) == 0 {
 		return nil
@@ -339,63 +376,27 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 	return nil
 }
 
-func (a *Agent) Run(stop <-chan struct{}) {
-	a.log.Info("starting agent loop", zap.String("server", a.ServerURL))
+func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 2 * time.Second}
 
-	if err := waitForServer(a.ServerURL, 10*time.Second, a.log); err != nil {
-		a.log.Error("server not available", zap.String("url", a.ServerURL), zap.Error(err))
-		return
-	}
+	log.Info("waiting for server", zap.String("url", baseURL), zap.Duration("timeout", timeout))
 
-	pollTicker := time.NewTicker(a.PollInterval)
-	reportTicker := time.NewTicker(a.ReportInterval)
-
-	defer pollTicker.Stop()
-	defer reportTicker.Stop()
-
-	for i := 0; i < a.RateLimit; i++ {
-		go a.sendWorker(stop)
-	}
-
-	go a.collectSystemMetrics(stop)
-
-	for {
-		select {
-		case <-pollTicker.C:
-			a.log.Debug("collecting metrics")
-			a.collectMetrics()
-
-		case <-reportTicker.C:
-			a.log.Debug("sending metrics")
-
-			var snapshot []models.Metrics
-
-			a.mu.Lock()
-			for name, val := range a.metrics {
-				var m models.Metrics
-				m.ID = name
-
-				if name == "PollCount" {
-					m.MType = MetricTypeCounter
-					v, _ := strconv.ParseInt(val, 10, 64)
-					m.Delta = &v
-				} else {
-					m.MType = MetricTypeGauge
-					v, _ := strconv.ParseFloat(val, 64)
-					m.Value = &v
-				}
-				snapshot = append(snapshot, m)
-			}
-			a.lastReportedPollCount = a.pollCount
-			a.mu.Unlock()
-
-			for _, m := range snapshot {
-				a.sendCh <- m
-			}
-
-		case <-stop:
-			a.log.Info("agent stopped gracefully")
-			return
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(baseURL + "/health")
+		if err == nil && resp.StatusCode == http.StatusOK {
+			_ = resp.Body.Close()
+			log.Info("server is ready", zap.String("url", baseURL))
+			return nil
 		}
+		if err != nil {
+			log.Error("server health check failed", zap.Error(err))
+		}
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
+
+	return fmt.Errorf("server %s not responding within %s", baseURL, timeout)
 }

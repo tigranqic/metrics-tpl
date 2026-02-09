@@ -39,35 +39,6 @@ const (
 	DefaultRateLimit       = 5
 )
 
-func getenvInt(key string, def int) (int, bool) {
-	if val := os.Getenv(key); val != "" {
-		if n, err := strconv.Atoi(val); err == nil && n > 0 {
-			return n, true
-		}
-	}
-	return def, false
-}
-
-func getenvString(key string, def string) (string, bool) {
-	if val := os.Getenv(key); val != "" {
-		return val, true
-	}
-	return def, false
-}
-
-func getenvBool(key string, def bool) (bool, bool) {
-	if val := os.Getenv(key); val != "" {
-		v := strings.ToLower(val)
-		if v == "true" || v == "1" {
-			return true, true
-		}
-		if v == "false" || v == "0" {
-			return false, true
-		}
-	}
-	return def, false
-}
-
 func Load(isAgent bool) (*Config, error) {
 	chooseString := func(envVal string, envSet bool, flagVal string, def string) string {
 		if envSet {
@@ -181,4 +152,33 @@ func Load(isAgent bool) (*Config, error) {
 		AuditFile:       auditFile,
 		AuditURL:        auditURL,
 	}, nil
+}
+
+func getenvInt(key string, def int) (int, bool) {
+	if val := os.Getenv(key); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			return n, true
+		}
+	}
+	return def, false
+}
+
+func getenvString(key string, def string) (string, bool) {
+	if val := os.Getenv(key); val != "" {
+		return val, true
+	}
+	return def, false
+}
+
+func getenvBool(key string, def bool) (bool, bool) {
+	if val := os.Getenv(key); val != "" {
+		v := strings.ToLower(val)
+		if v == "true" || v == "1" {
+			return true, true
+		}
+		if v == "false" || v == "0" {
+			return false, true
+		}
+	}
+	return def, false
 }

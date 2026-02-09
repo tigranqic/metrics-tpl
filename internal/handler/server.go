@@ -67,6 +67,19 @@ func (h *Handler) Router() http.Handler {
 	return r
 }
 
+func (h *Handler) NotifyAudit(r *http.Request, metrics []string) {
+	ip := strings.Split(r.RemoteAddr, ":")[0]
+	event := audit.Event{
+		Timestamp: time.Now().Unix(),
+		Metrics:   metrics,
+		IPAddress: ip,
+	}
+
+	if h.Audit != nil {
+		h.Audit.NotifyAllAsync(event)
+	}
+}
+
 func (h *Handler) pingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.Ping(); err != nil {
 		h.log.Error("DB connection error (pingHandler)", zap.Error(err))
@@ -356,17 +369,4 @@ func (h *Handler) getMetricValueJSONHandler(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
-}
-
-func (h *Handler) NotifyAudit(r *http.Request, metrics []string) {
-	ip := strings.Split(r.RemoteAddr, ":")[0]
-	event := audit.Event{
-		Timestamp: time.Now().Unix(),
-		Metrics:   metrics,
-		IPAddress: ip,
-	}
-
-	if h.Audit != nil {
-		h.Audit.NotifyAllAsync(event)
-	}
 }
