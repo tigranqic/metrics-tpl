@@ -16,6 +16,7 @@ func Example_createAuditEvent() {
 		IPAddress: "192.168.1.100",
 	}
 
+	_ = event.Timestamp
 	fmt.Printf("Event for metrics: %v\n", event.Metrics)
 	fmt.Printf("From IP: %s\n", event.IPAddress)
 	// Output:
@@ -32,6 +33,7 @@ func Example_multipleMetricsEvent() {
 	}
 
 	fmt.Printf("Updated %d metrics from %s\n", len(event.Metrics), event.IPAddress)
+	_ = event.Timestamp
 	// Output:
 	// Updated 4 metrics from 10.0.0.5
 }
@@ -49,11 +51,13 @@ func Example_auditEventWithBatchUpdate() {
 
 	for _, metric := range event.Metrics {
 		fmt.Printf("Metric updated: %s (IP: %s)\n", metric, event.IPAddress)
+		_ = event.Timestamp
 	}
 	// Output:
 	// Metric updated: temperature (IP: 172.16.0.1)
 	// Metric updated: humidity (IP: 172.16.0.1)
 	// Metric updated: pressure (IP: 172.16.0.1)
+
 }
 
 // Example_auditEventIPAddress demonstrates tracking the source IP address.
@@ -67,6 +71,9 @@ func Example_auditEventIPAddress() {
 	}
 
 	fmt.Printf("Metric update from client: %s\n", event.IPAddress)
+	fmt.Printf("Event for metrics: %v\n", event.Metrics)
+	_ = event.Timestamp
 	// Output:
 	// Metric update from client: 192.0.2.123
+	// Event for metrics: [agent_uptime]
 }
