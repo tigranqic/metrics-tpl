@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http/httptest"
 
 	"github.com/tigranqic/metrics-tpl/internal/handler"
@@ -79,7 +80,10 @@ func Example_updateJSONMetric() {
 
 	// Parse the response
 	var response models.Metrics
-	json.NewDecoder(w.Body).Decode(&response)
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		fmt.Printf("Failed to decode response: %v\n", err)
+		return
+	}
 
 	fmt.Printf("Updated metric: %s (type: %s, value: %.1f)\n",
 		response.ID, response.MType, *response.Value)
@@ -155,8 +159,12 @@ func Example_listAllMetrics() {
 	h := handler.NewHandler(store, nil, logger, "", nil)
 
 	// Add some metrics
-	store.Update("gauge", "temp", "22.5")
-	store.Update("counter", "requests", "100")
+	if err := store.Update("gauge", "temp", "22.5"); err != nil {
+		log.Fatal(err)
+	}
+	if err := store.Update("counter", "requests", "100"); err != nil {
+		log.Fatal(err)
+	}
 
 	// List all metrics
 	req := httptest.NewRequest("GET", "/", nil)

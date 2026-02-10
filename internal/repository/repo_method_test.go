@@ -37,10 +37,14 @@ func Example_updateCounterMetric() {
 	store := repository.NewMemStorage("", 0)
 
 	// First update
-	store.Update("counter", "requests", "100")
+	if err := store.Update("counter", "requests", "100"); err != nil {
+		log.Fatal(err)
+	}
 
 	// Second update - adds to existing value
-	store.Update("counter", "requests", "50")
+	if err := store.Update("counter", "requests", "50"); err != nil {
+		log.Fatal(err)
+	}
 
 	// Retrieve the counter
 	value, err := store.GetCounter("requests")
@@ -100,9 +104,15 @@ func Example_getAllMetrics() {
 	store := repository.NewMemStorage("", 0)
 
 	// Add several metrics
-	store.Update("gauge", "cpu", "75.5")
-	store.Update("gauge", "memory", "512.0")
-	store.Update("counter", "requests", "1000")
+	if err := store.Update("gauge", "cpu", "75.5"); err != nil {
+		log.Fatal(err)
+	}
+	if err := store.Update("gauge", "memory", "512.0"); err != nil {
+		log.Fatal(err)
+	}
+	if err := store.Update("counter", "requests", "1000"); err != nil {
+		log.Fatal(err)
+	}
 
 	// Get all metrics
 	metrics, err := store.GetAll()
@@ -139,7 +149,9 @@ func Example_errorHandling() {
 	}
 
 	// Add a gauge metric
-	store.Update("gauge", "temp", "22.5")
+	if err := store.Update("gauge", "temp", "22.5"); err != nil {
+		log.Fatal(err)
+	}
 
 	// Try to get it as a counter (wrong type)
 	_, err = store.GetCounter("temp")
@@ -163,9 +175,12 @@ func Example_filePersistence() {
 	store := repository.NewMemStorage("/tmp/metrics.json", 5)
 
 	// Add metrics
-	store.Update("gauge", "temperature", "23.5")
-	store.Update("counter", "events", "42")
-
+	if err := store.Update("gauge", "temperature", "23.5"); err != nil {
+		log.Fatal(err)
+	}
+	if err := store.Update("counter", "events", "42"); err != nil {
+		log.Fatal(err)
+	}
 	// Metrics are periodically saved to /tmp/metrics.json
 	// You can load them from the file on next application start
 
@@ -192,7 +207,9 @@ func Example_concurrentUpdates() {
 
 	// For this example, we'll do sequential updates
 	for i := 0; i < 5; i++ {
-		store.Update("counter", "requests", "10")
+		if err := store.Update("counter", "requests", "10"); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	count, _ := store.GetCounter("requests")
