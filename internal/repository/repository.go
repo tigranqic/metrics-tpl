@@ -1,3 +1,5 @@
+// Package repository provides storage abstraction layer for metrics.
+// It implements PostgreSQL storage backends.
 package repository
 
 import (
@@ -12,16 +14,39 @@ import (
 	"go.uber.org/zap"
 )
 
+// PostgresStorage implements the Storage interface using PostgreSQL database.
+// It provides persistent storage for metrics with transaction support for batch operations.
+// PostgresStorage includes automatic retry logic for temporary connection failures.
 type PostgresStorage struct {
-	dbExec DBExecutor
-	db     *sql.DB
-	log    *zap.Logger
+	dbExec DBExecutor  // Database executor (database/sql.DB or transaction)
+	db     *sql.DB     // Main database connection
+	log    *zap.Logger // Logger for error reporting
 }
 
+// NewPostgresStorage creates a new PostgresStorage instance.
+// Parameters:
+//   - db: *sql.DB connection pool to PostgreSQL database
+//   - log: *zap.Logger for error logging and debugging
+//
+// Returns configured PostgresStorage ready for operations.
 func NewPostgresStorage(db *sql.DB, log *zap.Logger) *PostgresStorage {
 	return &PostgresStorage{dbExec: db, db: db, log: log}
 }
 
+// Update updates or creates a single metric in PostgreSQL.
+// For gauge metrics: replaces the value using UPSERT (ON CONFLICT UPDATE).
+// For counter metrics: adds to existing value using UPSERT.
+// Includes automatic retry logic for connection failures.
+//
+// Parameters:
+//   - metricType: "gauge" or "counter"
+//   - name: metric ID (table primary key)
+//   - value: string representation of numeric value
+//
+// Returns error if:
+//   - metricType is neither gauge nor counter
+//   - value cannot be parsed as numeric
+//   - database operation fails after retries
 func (s *PostgresStorage) Update(metricType, name, value string) error {
 	ctx := context.Background()
 
@@ -59,6 +84,7 @@ func (s *PostgresStorage) Update(metricType, name, value string) error {
 	}
 }
 
+// GetGauge returns gauge metric value by name.
 func (s *PostgresStorage) GetGauge(name string) (float64, error) {
 	var v float64
 	err := s.db.QueryRow(`
@@ -70,6 +96,8 @@ func (s *PostgresStorage) GetGauge(name string) (float64, error) {
 	return v, err
 }
 
+// GetCounter returns the value of a counter metric by name.
+// Returns an error if the metric does not exist or if the database query fails.
 func (s *PostgresStorage) GetCounter(name string) (int64, error) {
 	var v int64
 	err := s.db.QueryRow(`
@@ -81,6 +109,11 @@ func (s *PostgresStorage) GetCounter(name string) (int64, error) {
 	return v, err
 }
 
+// GetAll returns all stored metrics.
+// For gauge metrics, Value field is set and Delta is nil.
+// For counter metrics, Delta field is set and Value is nil.
+//
+// Returns an error if the database query fails.
 func (s *PostgresStorage) GetAll() (map[string]*models.Metrics, error) {
 	rows, err := s.db.Query(`SELECT id, mtype, delta, value FROM metrics`)
 	if err != nil {
@@ -125,6 +158,9 @@ func (s *PostgresStorage) GetAll() (map[string]*models.Metrics, error) {
 	return result, nil
 }
 
+// UpdateBatch updates metrics in batch using a single transaction.
+// For gauge metrics, only the last value per ID is stored.
+// For counter metrics, deltas are summed before update.
 func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 	if len(batch) == 0 {
 		return nil

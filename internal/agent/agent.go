@@ -1,3 +1,6 @@
+// Package agent provides a metrics collection agent that periodically gathers
+// system and application metrics and reports them to a configured server.
+// It supports rate limiting, retries, batching, and optional authentication via a key.
 package agent
 
 import (
@@ -5,7 +8,6 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
-
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -24,10 +26,16 @@ import (
 )
 
 const (
-	MetricTypeGauge   = "gauge"
+	// MetricTypeGauge represents a gauge metric type.
+	MetricTypeGauge = "gauge"
+
+	// MetricTypeCounter represents a counter metric type.
 	MetricTypeCounter = "counter"
 )
 
+// Agent represents a metrics collection agent.
+// It collects system metrics (CPU, memory), runtime stats, and custom metrics,
+// then reports them to a remote server at configured intervals.
 type Agent struct {
 	ServerURL      string
 	PollInterval   time.Duration
@@ -46,6 +54,8 @@ type Agent struct {
 	mu     sync.Mutex
 }
 
+// NewAgent creates a new Agent with the given server URL, poll and report intervals,
+// optional key for authentication, and a rate limit for concurrent metric reporting.
 func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, key string, rateLimit int) *Agent {
 	retryClient := retryablehttp.NewClient()
 	retryClient.RetryMax = 3
@@ -70,6 +80,8 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, key 
 	}
 }
 
+// Run starts the main agent loop. It periodically collects metrics and sends them
+// to the server until a stop signal is received.
 func (a *Agent) Run(stop <-chan struct{}) {
 	a.log.Info("starting agent loop", zap.String("server", a.ServerURL))
 
@@ -80,7 +92,6 @@ func (a *Agent) Run(stop <-chan struct{}) {
 
 	pollTicker := time.NewTicker(a.PollInterval)
 	reportTicker := time.NewTicker(a.ReportInterval)
-
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
@@ -98,7 +109,6 @@ func (a *Agent) Run(stop <-chan struct{}) {
 
 		case <-reportTicker.C:
 			a.log.Debug("sending metrics")
-
 			var snapshot []models.Metrics
 
 			a.mu.Lock()
@@ -131,8 +141,9 @@ func (a *Agent) Run(stop <-chan struct{}) {
 	}
 }
 
+// sendWorker continuously reads metrics from the sendCh channel and sends them
+// to the server until a stop signal is received.
 func (a *Agent) sendWorker(stop <-chan struct{}) {
-
 	for {
 		select {
 		case m := <-a.sendCh:
@@ -145,6 +156,7 @@ func (a *Agent) sendWorker(stop <-chan struct{}) {
 	}
 }
 
+// sendSingle sends a single metric to the server.
 func (a *Agent) sendSingle(m models.Metrics) error {
 	if m.MType == MetricTypeGauge {
 		return a.sendMetric(MetricTypeGauge, m.ID, fmt.Sprintf("%f", *m.Value))
@@ -152,6 +164,8 @@ func (a *Agent) sendSingle(m models.Metrics) error {
 	return a.sendMetric(MetricTypeCounter, m.ID, fmt.Sprintf("%d", *m.Delta))
 }
 
+// collectSystemMetrics periodically collects system-level metrics (CPU and memory)
+// and updates the internal metrics map until a stop signal is received.
 func (a *Agent) collectSystemMetrics(stop <-chan struct{}) {
 	ticker := time.NewTicker(a.PollInterval)
 	defer ticker.Stop()
@@ -177,6 +191,8 @@ func (a *Agent) collectSystemMetrics(stop <-chan struct{}) {
 	}
 }
 
+// collectMetrics collects runtime memory statistics and updates the internal metrics map.
+// It also updates special metrics like PollCount and a random value.
 func (a *Agent) collectMetrics() {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
@@ -219,6 +235,7 @@ func (a *Agent) collectMetrics() {
 	a.metrics["RandomValue"] = strconv.FormatFloat(rand.Float64()*1000, 'f', 3, 64)
 }
 
+// sendMetric sends a single metric to the server.
 func (a *Agent) sendMetric(metricType, name, value string) error {
 	fullURL, err := url.JoinPath(a.ServerURL, "/update/")
 	if err != nil {
@@ -270,7 +287,6 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
-
 	if hash != "" {
 		req.Header.Set("Hash", hash)
 	}
@@ -278,28 +294,21 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 	start := time.Now()
 	resp, err := a.client.Do(req)
 	duration := time.Since(start)
-
 	if err != nil {
 		a.log.Error("failed to send request", zap.String("url", fullURL), zap.Error(err), zap.Duration("duration", duration))
 		return fmt.Errorf("failed to send request to %q: %w", fullURL, err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer func() { _ = resp.Body.Close() }()
 
-	a.log.Info("metric sent",
-		zap.String("url", fullURL),
-		zap.Int("status", resp.StatusCode),
-		zap.Duration("duration", duration),
-	)
-
+	a.log.Info("metric sent", zap.String("url", fullURL), zap.Int("status", resp.StatusCode), zap.Duration("duration", duration))
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned %s", resp.Status)
 	}
-
 	return nil
 }
 
+// sendBatch sends multiple metrics in a single request. If the batch endpoint is
+// unavailable or fails, it falls back to sending individual metrics.
 func (a *Agent) sendBatch(metrics []models.Metrics) error {
 	if len(metrics) == 0 {
 		return nil
@@ -340,7 +349,7 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 	resp, err := a.client.Do(req)
 	duration := time.Since(start)
 
-	if err != nil || resp.StatusCode >= 400 {
+	if err != nil || (resp != nil && resp.StatusCode >= 400) {
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
 			a.log.Warn("batch endpoint not found, falling back to individual metrics")
 		} else if err != nil {
@@ -348,18 +357,14 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 		} else {
 			a.log.Warn("batch send failed with status", zap.Int("status", resp.StatusCode))
 		}
-
 		if resp != nil {
-			defer func() {
-				_ = resp.Body.Close()
-			}()
+			defer func() { _ = resp.Body.Close() }()
 		}
-
 		for _, m := range metrics {
-			if m.MType == "gauge" {
-				_ = a.sendMetric("gauge", m.ID, fmt.Sprintf("%f", *m.Value))
+			if m.MType == MetricTypeGauge {
+				_ = a.sendMetric(MetricTypeGauge, m.ID, fmt.Sprintf("%f", *m.Value))
 			} else {
-				_ = a.sendMetric("counter", m.ID, fmt.Sprintf("%d", *m.Delta))
+				_ = a.sendMetric(MetricTypeCounter, m.ID, fmt.Sprintf("%d", *m.Delta))
 			}
 		}
 		return nil
@@ -376,6 +381,7 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 	return nil
 }
 
+// waitForServer waits until the server health endpoint responds OK or the timeout expires.
 func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 2 * time.Second}
@@ -397,6 +403,5 @@ func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-
 	return fmt.Errorf("server %s not responding within %s", baseURL, timeout)
 }

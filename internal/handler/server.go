@@ -1,3 +1,7 @@
+// Package handler provides HTTP request handlers for the metrics service.
+// It implements REST API endpoints for updating and retrieving metrics
+// with support for both single and batch operations, as well as
+// authentication and compression middleware.
 package handler
 
 import (
@@ -22,14 +26,30 @@ import (
 	models "github.com/tigranqic/metrics-tpl/internal/model"
 )
 
+// Handler handles HTTP requests for the metrics service.
+// It manages metric updates, retrievals, batch operations, and audit logging.
+// Handler is responsible for:
+//   - Validating incoming metric data (gauge and counter types)
+//   - Delegating storage operations to the Storage interface
+//   - Notifying audit observers of metric updates
+//   - Applying middleware for compression and hash validation
 type Handler struct {
-	store repository.Storage
-	db    *sql.DB
-	log   *zap.Logger
-	key   string
-	Audit *audit.Publisher
+	store repository.Storage // Storage backend (memory or PostgreSQL)
+	db    *sql.DB            // Database connection
+	log   *zap.Logger        // Logger instance
+	key   string             // Secret key for hash authentication
+	Audit *audit.Publisher   // Audit event publisher
 }
 
+// NewHandler creates a new Handler instance.
+// Parameters:
+//   - store: Storage implementation (MemStorage or PostgresStorage)
+//   - db: Database connection for health checks
+//   - log: Logger instance for error logging
+//   - key: Secret key used for request hash verification
+//   - auditPublisher: Publisher for audit events (can be nil to disable auditing)
+//
+// Returns a configured Handler ready to serve HTTP requests.
 func NewHandler(
 	store repository.Storage,
 	db *sql.DB,
@@ -46,6 +66,24 @@ func NewHandler(
 	}
 }
 
+// Router returns a configured http.Handler with all routes and middleware.
+// The router includes the following endpoints:
+//
+//	GET  /             - List all metrics in HTML format
+//	GET  /ping         - Health check (database connectivity)
+//	GET  /health       - Service health status
+//	GET  /value/{type}/{name}        - Get single metric value (URL parameters)
+//	POST /update/{type}/{name}/{value} - Update single metric (URL parameters)
+//	POST /update/      - Update single metric (JSON body)
+//	POST /value/       - Get metric value (JSON body)
+//	POST /updates/     - Batch update metrics (JSON array body)
+//
+// Middleware applied:
+//   - GzipDecompress: Decompresses gzip-encoded request bodies
+//   - HashMiddleware: Validates request signatures using HMAC-SHA256
+//   - GzipCompress: Compresses response bodies with gzip
+//
+// Returns an http.Handler ready to be used with http.ListenAndServe.
 func (h *Handler) Router() http.Handler {
 	r := chi.NewRouter()
 
@@ -67,6 +105,14 @@ func (h *Handler) Router() http.Handler {
 	return r
 }
 
+// NotifyAudit sends an audit event about metric updates to registered audit observers.
+// This method extracts the client IP from the request and creates an Event containing:
+//   - Timestamp: Current Unix timestamp
+//   - Metrics: List of metric IDs that were updated
+//   - IPAddress: Client IP address extracted from RemoteAddr
+//
+// The audit event is sent asynchronously to all registered observers.
+// This method is safe to call when Audit is nil (no-op in that case).
 func (h *Handler) NotifyAudit(r *http.Request, metrics []string) {
 	ip := strings.Split(r.RemoteAddr, ":")[0]
 	event := audit.Event{

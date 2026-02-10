@@ -14,6 +14,10 @@ PG_DSN=${DATABASE_DSN}
 
 STATICTEST_BIN=./statictest-darwin-arm64
 
+GODOC_PORT ?= 8089
+GODOC_TMP ?= /tmp/godoc
+MODULE_NAME := metrics-tpl
+
 .PHONY: all build test clean fmt vet lint help
 
 all: build test
@@ -125,3 +129,21 @@ fmt-all:
 	gofmt -w .
 	goimports -w .
 	@echo "Code and imports formatted ✅"
+
+GODOC_PORT ?= 8089
+MODULE_NAME := metrics-tpl
+
+godoc:
+	@TMP_DIR=$$(mktemp -d /tmp/godoc-XXXXXX); \
+	echo "Using temp dir: $$TMP_DIR"; \
+	mkdir -p $$TMP_DIR/src/$(MODULE_NAME); \
+	rsync -a \
+		--exclude .git \
+		--exclude vendor \
+		./ $$TMP_DIR/src/$(MODULE_NAME); \
+	echo "Starting godoc at http://localhost:$(GODOC_PORT)"; \
+	GO111MODULE=off \
+	GOMOD=/dev/null \
+	GOPATH=$$TMP_DIR \
+	GOCACHE=$$TMP_DIR/cache \
+	godoc -http=:$(GODOC_PORT)

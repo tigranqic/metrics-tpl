@@ -18,26 +18,32 @@ import (
 	"go.uber.org/zap"
 )
 
+// main initializes configuration, logging, storage, and starts the HTTP server.
 func main() {
+	// Load server configuration
 	cfg, err := config.Load(false)
 	if err != nil {
 		println("failed to load server config:", err.Error())
 		os.Exit(1)
 	}
 
+	// Initialize logger
 	logger.Init(cfg.LogLevel, cfg.LogFormat)
 	log := logger.Get()
 
+	// Check for unknown command-line arguments
 	if len(flag.Args()) > 0 {
 		log.Error("unknown arguments", zap.Strings("args", flag.Args()))
 		os.Exit(1)
 	}
 
+	// Initialize database and storage
 	db, store, err := repository.InitStorage(cfg, log)
 	if err != nil {
 		log.Fatal("failed to initialize storage", zap.Error(err))
 	}
 
+	// Setup audit observers
 	var observers []audit.Observer
 
 	if cfg.AuditFile != "" {
@@ -52,14 +58,17 @@ func main() {
 		observers = append(observers, audit.NewHTTPObserver(cfg.AuditURL))
 	}
 
+	// Initialize audit publisher if any observers exist
 	var auditPublisher *audit.Publisher
 	if len(observers) > 0 {
 		auditPublisher = audit.NewPublisherWithPool(log, observers, 3)
 	}
 
+	// Create HTTP handler with middleware
 	h := handler.NewHandler(store, db, log, cfg.Key, auditPublisher)
 	loggedHandler := middleware.LoggingMiddleware(log)(h.Router())
 
+	// Start pprof server in a separate goroutine
 	go func() {
 		log.Info("starting pprof server", zap.String("address", "localhost:6060"))
 		if err := http.ListenAndServe(":6065", nil); err != nil {
@@ -67,8 +76,8 @@ func main() {
 		}
 	}()
 
+	// Start main HTTP server
 	log.Info("starting HTTP server", zap.String("address", cfg.ServerAddr))
-
 	if err := http.ListenAndServe(cfg.ServerAddr, loggedHandler); err != nil {
 		log.Error("server stopped with error", zap.Error(err))
 		os.Exit(1)

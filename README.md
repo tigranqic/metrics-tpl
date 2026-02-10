@@ -43,7 +43,7 @@ git fetch template && git checkout template/v2 .github
 - **Hexagonal Architecture**
 - **Layered Architecture**
 
-# run test
+## run test
  - make test ITERATION=1 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
  - make test ITERATION=2A SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
  - make test ITERATION=2B SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json
@@ -62,5 +62,76 @@ git fetch template && git checkout template/v2 .github
 - make test ITERATION=13 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json DATABASE_DSN="postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
 - make test ITERATION=14 SOURCE_PATH=. SERVER_PORT=8080 FILE_STORAGE_PATH=metrics.json DATABASE_DSN="postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable" KEY=hello_key
 
-# migration
+## migration
 make migrate-down DATABASE_DSN="postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
+
+## Documentation (godoc)
+
+The project provides automatically generated documentation using `godoc`.
+
+The documentation is generated from Go source code comments and allows you to
+browse packages, their descriptions, exported types, functions, and methods.
+
+### Running godoc
+
+To start the documentation server, run:
+
+```bash
+make godoc
+```
+
+- After the server starts, the terminal will print the address, for example:
+```
+http://localhost:8089
+```
+
+### Navigating the documentation
+
+#### After opening the page in a browser, the following sections are available:
+
+  - Project documentation
+
+```
+http://localhost:8089/pkg/metrics-tpl/
+```
+ - Application commands
+
+     - Agent:
+
+```
+http://localhost:8089/pkg/metrics-tpl/cmd/agent/
+```
+  - Server:
+
+```
+http://localhost:8089/pkg/metrics-tpl/cmd/server/
+```
+  - Internal packages (internal)
+
+#### Packages located in the internal directory are intended for use only within
+the project, but they are still visible in godoc:
+
+#### Examples:
+  - Agent implementation:
+
+```
+http://localhost:8089/pkg/metrics-tpl/internal/agent/
+```
+
+  - HTTP handlers:
+
+```
+http://localhost:8089/pkg/metrics-tpl/internal/handler/
+```
+
+  - Middleware:
+
+```
+http://localhost:8089/pkg/metrics-tpl/internal/middleware/
+```
+
+  - Reusable packages (pkg)
+
+```
+http://localhost:8089/pkg/metrics-tpl/pkg/
+```
