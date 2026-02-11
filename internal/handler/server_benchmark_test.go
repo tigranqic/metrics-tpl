@@ -13,7 +13,7 @@ import (
 func BenchmarkJSON_ReadAll_Unmarshal(b *testing.B) {
 	data := []byte(`{"id":"test","type":"gauge","value":123.45}`)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var m models.Metrics
 		body := io.NopCloser(bytes.NewReader(data))
 		buf, _ := io.ReadAll(body)
@@ -24,7 +24,7 @@ func BenchmarkJSON_ReadAll_Unmarshal(b *testing.B) {
 func BenchmarkJSON_Decoder(b *testing.B) {
 	data := []byte(`{"id":"test","type":"gauge","value":123.45}`)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var m models.Metrics
 		body := io.NopCloser(bytes.NewReader(data))
 		_ = json.NewDecoder(body).Decode(&m)
@@ -41,7 +41,7 @@ func BenchmarkBatchDecoder(b *testing.B) {
 
 	data, _ := json.Marshal(batch)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var out []M
 		body := io.NopCloser(bytes.NewReader(data))
 		_ = json.NewDecoder(body).Decode(&out)
@@ -56,7 +56,7 @@ func BenchmarkJSONEncode(b *testing.B) {
 		Value: &v,
 	}
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var buf bytes.Buffer
 		_ = json.NewEncoder(&buf).Encode(m)
 	}
@@ -65,7 +65,7 @@ func BenchmarkJSONEncode(b *testing.B) {
 func BenchmarkParseFloat(b *testing.B) {
 	value := "123.456789"
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = strconv.ParseFloat(value, 64)
 	}
 }
@@ -73,7 +73,7 @@ func BenchmarkParseFloat(b *testing.B) {
 func BenchmarkParseInt(b *testing.B) {
 	value := "12345678"
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = strconv.ParseInt(value, 10, 64)
 	}
 }
@@ -81,7 +81,7 @@ func BenchmarkParseInt(b *testing.B) {
 func BenchmarkFormatFloat(b *testing.B) {
 	value := 123.456789
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = strconv.FormatFloat(value, 'f', -1, 64)
 	}
 }
@@ -89,7 +89,7 @@ func BenchmarkFormatFloat(b *testing.B) {
 func BenchmarkFormatInt(b *testing.B) {
 	value := int64(12345678)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = strconv.FormatInt(value, 10)
 	}
 }
@@ -110,7 +110,7 @@ func BenchmarkBatchDecoder_LargeBatch(b *testing.B) {
 	data, _ := json.Marshal(batch)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var out []M
 		body := io.NopCloser(bytes.NewReader(data))
 		_ = json.NewDecoder(body).Decode(&out)
@@ -118,7 +118,7 @@ func BenchmarkBatchDecoder_LargeBatch(b *testing.B) {
 }
 
 func BenchmarkCreateGaugeMetric(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		v := float64(123.45)
 		_ = models.Metrics{
 			ID:    "test_gauge",
@@ -129,7 +129,7 @@ func BenchmarkCreateGaugeMetric(b *testing.B) {
 }
 
 func BenchmarkCreateCounterMetric(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		d := int64(100)
 		_ = models.Metrics{
 			ID:    "test_counter",
@@ -140,7 +140,7 @@ func BenchmarkCreateCounterMetric(b *testing.B) {
 }
 
 func BenchmarkMetricsMapCreation(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		metricsMap := make(map[string]*models.Metrics)
 
 		for j := 0; j < 100; j++ {
@@ -186,7 +186,7 @@ func BenchmarkMetricsMapIteration(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		type Metric struct {
 			ID    string
 			MType string

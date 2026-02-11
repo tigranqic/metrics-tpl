@@ -41,7 +41,7 @@ func BenchmarkUpdate_Gauge(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = store.Update(models.Gauge, name, value)
 	}
 }
@@ -65,7 +65,7 @@ func BenchmarkUpdate_Counter(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = store.Update(models.Counter, name, value)
 	}
 }
@@ -85,7 +85,7 @@ func BenchmarkGetGauge(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = store.GetGauge(name)
 	}
 }
@@ -105,7 +105,7 @@ func BenchmarkGetCounter(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = store.GetCounter(name)
 	}
 }
@@ -142,7 +142,7 @@ func BenchmarkUpdateBatch_Small(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = store.UpdateBatch(metrics)
 	}
 }
@@ -179,7 +179,7 @@ func BenchmarkUpdateBatch_Large(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = store.UpdateBatch(metrics)
 	}
 }
@@ -201,7 +201,7 @@ func BenchmarkGetAll_Small(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = store.GetAll()
 	}
 }
@@ -223,7 +223,7 @@ func BenchmarkGetAll_Large(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = store.GetAll()
 	}
 }
@@ -233,7 +233,7 @@ func BenchmarkParsing_MixedMetrics(b *testing.B) {
 	counterValues := []string{"100", "1000", "50", "10000"}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for _, v := range gaugeValues {
 			_, _ = strconv.ParseFloat(v, 64)
 		}

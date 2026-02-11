@@ -13,7 +13,7 @@ func BenchmarkGzipCompress_Small(b *testing.B) {
 	data := []byte(`{"id":"test_metric","type":"gauge","value":123.45}`)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var buf bytes.Buffer
 		w := gzip.NewWriter(&buf)
 		_, _ = w.Write(data)
@@ -30,7 +30,7 @@ func BenchmarkGzipCompress_Medium(b *testing.B) {
 	data := []byte(response)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var buf bytes.Buffer
 		w := gzip.NewWriter(&buf)
 		_, _ = w.Write(data)
@@ -50,7 +50,7 @@ func BenchmarkGzipCompress_Large(b *testing.B) {
 	data := []byte(response)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var buf bytes.Buffer
 		w := gzip.NewWriter(&buf)
 		_, _ = w.Write(data)
@@ -68,7 +68,7 @@ func BenchmarkGzipDecompress_Small(b *testing.B) {
 	compressedData := compressed.Bytes()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		r, _ := gzip.NewReader(bytes.NewReader(compressedData))
 		_, _ = io.ReadAll(r)
 		_ = r.Close()
@@ -90,7 +90,7 @@ func BenchmarkGzipDecompress_Medium(b *testing.B) {
 	compressedData := compressed.Bytes()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		r, _ := gzip.NewReader(bytes.NewReader(compressedData))
 		_, _ = io.ReadAll(r)
 		_ = r.Close()
@@ -102,7 +102,7 @@ func BenchmarkHash_Small(b *testing.B) {
 	key := "test_key"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = generateHashBench(data, key)
 	}
 }
@@ -112,7 +112,7 @@ func BenchmarkHash_Medium(b *testing.B) {
 	key := "test_key"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = generateHashBench(data, key)
 	}
 }

@@ -3,13 +3,16 @@ package audit
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"sync"
 )
 
 // FileObserver writes audit events to a local file in JSON format.
 // Each event is written as a single line of JSON.
 type FileObserver struct {
-	File *os.File // File handle used for writing events
+	File *os.File   // File handle used for writing events
+	mu   sync.Mutex // Mutex to synchronize writes to the file
 }
 
 // NewFileObserver creates a new FileObserver that writes to the given file path.
@@ -29,9 +32,15 @@ func NewFileObserver(path string) (*FileObserver, error) {
 func (o *FileObserver) Notify(event Event) error {
 	data, err := json.Marshal(event)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal audit event: %w", err)
 	}
 
-	_, err = o.File.Write(append(data, '\n'))
-	return err
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if _, err := o.File.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("write audit event to file: %w", err)
+	}
+
+	return nil
 }

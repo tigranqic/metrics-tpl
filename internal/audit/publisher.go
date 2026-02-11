@@ -4,6 +4,7 @@ package audit
 
 import (
 	"context"
+	"sync"
 
 	"go.uber.org/zap"
 )
@@ -14,6 +15,7 @@ type Publisher struct {
 	observers []Observer         // List of registered audit observers
 	JobCh     chan Event         // Buffered channel of audit events
 	cancel    context.CancelFunc // Cancels all worker goroutines
+	mu        sync.RWMutex       // Mutex to protect access to observers slice
 }
 
 // NewPublisherWithPool creates a new Publisher with a fixed-size worker pool.
@@ -56,6 +58,25 @@ func (p *Publisher) Shutdown() {
 	close(p.JobCh)
 }
 
+func (p *Publisher) AddObserver(o Observer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.observers = append(p.observers, o)
+}
+
+func (p *Publisher) RemoveObserver(target Observer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for i, o := range p.observers {
+		if o == target {
+			p.observers = append(p.observers[:i], p.observers[i+1:]...)
+			return
+		}
+	}
+}
+
 // worker processes audit events from the JobCh channel and notifies all observers.
 // This method runs in a goroutine and exits when the context is cancelled.
 func (p *Publisher) worker(ctx context.Context) {
@@ -63,8 +84,16 @@ func (p *Publisher) worker(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case e := <-p.JobCh:
-			for _, o := range p.observers {
+		case e, ok := <-p.JobCh:
+			if !ok {
+				return
+			}
+			p.mu.RLock()
+			observers := make([]Observer, len(p.observers))
+			copy(observers, p.observers)
+			p.mu.RUnlock()
+
+			for _, o := range observers {
 				if err := o.Notify(e); err != nil {
 					p.log.Error("observer notify failed", zap.Error(err))
 				}
