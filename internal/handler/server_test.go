@@ -24,7 +24,7 @@ func TestHandler_Router(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "")
+	h := NewHandler(store, db, logger, "", nil)
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/update/gauge/Alloc/123.45", nil)
@@ -129,7 +129,7 @@ func TestHandler_JSONEndpoints(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "")
+	h := NewHandler(store, db, logger, "", nil)
 	router := h.Router()
 
 	gaugeBody := `{"id":"Alloc","type":"gauge","value":123.45}`
@@ -208,7 +208,7 @@ func TestHandler_WithKey_InvalidHash(t *testing.T) {
 	db := setupTestDB(t)
 	logger, _ := zap.NewDevelopment()
 
-	h := NewHandler(store, db, logger, "secret")
+	h := NewHandler(store, db, logger, "secret", nil)
 	router := h.Router()
 
 	body := `{"id":"Alloc","type":"gauge","value":123.45}`
@@ -231,7 +231,7 @@ func TestHandler_WithKey_ValidHash(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 
 	key := "secret"
-	h := NewHandler(store, db, logger, key)
+	h := NewHandler(store, db, logger, key, nil)
 	router := h.Router()
 
 	body := []byte(`{"id":"Alloc","type":"gauge","value":123.45}`)
@@ -259,7 +259,7 @@ func TestHandler_WithKey_HealthNoHash(t *testing.T) {
 	db := setupTestDB(t)
 	logger, _ := zap.NewDevelopment()
 
-	h := NewHandler(store, db, logger, "secret")
+	h := NewHandler(store, db, logger, "secret", nil)
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -268,6 +268,214 @@ func TestHandler_WithKey_HealthNoHash(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /health, got %d", w.Code)
+	}
+}
+
+func TestHandler_Ping(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger, "secret", nil)
+	router := h.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for /ping, got %d", w.Code)
+	}
+
+	badDB, _ := sql.Open("postgres", "postgres://invalid:invalid@127.0.0.1:5432/bad_db?sslmode=disable")
+	h2 := NewHandler(store, badDB, logger, "", nil)
+	router2 := h2.Router()
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	router2.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for bad DB ping, got %d", w2.Code)
+	}
+
+}
+
+func TestHandler_UpdateMetricsBatch_Empty(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger, "", nil)
+	router := h.Router()
+
+	req := httptest.NewRequest(http.MethodPost, "/updates/", strings.NewReader("[]"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty batch, got %d", w.Code)
+	}
+}
+
+func TestHandler_UpdateMetricsBatch_InvalidJSON(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger, "", nil)
+	router := h.Router()
+
+	req := httptest.NewRequest(http.MethodPost, "/updates/", strings.NewReader("{invalid-json}"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid JSON batch, got %d", w.Code)
+	}
+}
+
+func TestHandler_UpdateMetricJSON_InvalidType(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger, "", nil)
+	router := h.Router()
+
+	body := `{"id":"Alloc","type":"unknown","value":123.45}`
+	req := httptest.NewRequest(http.MethodPost, "/update/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid metric type, got %d", w.Code)
+	}
+}
+
+func TestHandler_ConcurrentCounterUpdates(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger, "", nil)
+	router := h.Router()
+
+	const goroutines = 10
+	const increment = 3
+	done := make(chan struct{}, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			req := httptest.NewRequest(http.MethodPost, "/update/counter/Concurrent/3", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+		}()
+	}
+
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+
+	val, err := store.GetCounter("Concurrent")
+	if err != nil || val != goroutines*increment {
+		t.Fatalf("expected counter %d, got %v, err %v", goroutines*increment, val, err)
+	}
+}
+
+func TestHandler_BatchUpdate_ValidMetrics(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger, "", nil)
+	router := h.Router()
+
+	batch := `[{"id":"G1","type":"gauge","value":12.3},{"id":"C1","type":"counter","delta":7}]`
+	req := httptest.NewRequest(http.MethodPost, "/updates/", strings.NewReader(batch))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid batch, got %d", w.Code)
+	}
+
+	if v, _ := store.GetGauge("G1"); v != 12.3 {
+		t.Fatalf("expected G1=12.3, got %v", v)
+	}
+	if c, _ := store.GetCounter("C1"); c != 7 {
+		t.Fatalf("expected C1=7, got %v", c)
+	}
+}
+
+func TestHandler_Ping_ClosedDB(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	if err := db.Close(); err != nil {
+		t.Fatalf("failed to close test db: %v", err)
+	}
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger, "", nil)
+	router := h.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for closed DB ping, got %d", w.Code)
+	}
+}
+
+func TestHandler_Index_EmptyStore(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+	}()
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger, "", nil)
+	router := h.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for / index with empty store, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "<html>") {
+		t.Fatalf("expected HTML content, got %s", w.Body.String())
 	}
 }
 
@@ -282,6 +490,9 @@ func containsAll(s string, substrings ...string) bool {
 
 func setupTestDB(t *testing.T) *sql.DB {
 	dsn := os.Getenv("DATABASE_DSN")
+	if dsn == "" {
+		t.Fatal("DATABASE_DSN is not set")
+	}
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -289,11 +500,8 @@ func setupTestDB(t *testing.T) *sql.DB {
 	}
 
 	if err := db.Ping(); err != nil {
-		defer func() {
-			if err := db.Close(); err != nil {
-				t.Fatalf("failed to close test DB: %v", err)
-			}
-		}()
+		_ = db.Close()
+		t.Fatalf("failed to ping test DB: %v", err)
 	}
 
 	return db

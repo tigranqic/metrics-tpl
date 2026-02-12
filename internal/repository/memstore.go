@@ -1,3 +1,4 @@
+// Package repository provides storage abstraction layer for metrics.
 package repository
 
 import (
@@ -12,14 +13,54 @@ import (
 	models "github.com/tigranqic/metrics-tpl/internal/model"
 )
 
+// Storage defines the interface for metric storage implementations.
+// Implementations must support both gauge and counter metrics,
+// single and batch operations, and provide atomicity for batch updates.
 type Storage interface {
+	// Update updates or creates a single metric.
+	// For gauge metrics: replaces the existing value.
+	// For counter metrics: adds the delta to existing value (or creates new if not exists).
+	// Parameters:
+	//   - metricType: "gauge" or "counter"
+	//   - name: metric identifier
+	//   - value: string representation of the value to update
+	// Returns error if metric type is invalid or value cannot be parsed.
 	Update(metricType, name, value string) error
+
+	// UpdateBatch updates multiple metrics in a single operation.
+	// For gauge metrics: replaces values.
+	// For counter metrics: adds deltas to existing values.
+	// All metrics in the batch are updated together (all succeed or all fail).
+	// Parameters:
+	//   - batch: slice of metrics to update
+	// Returns error if batch contains invalid data or update fails.
 	UpdateBatch(batch []models.Metrics) error
+
+	// GetGauge retrieves a gauge metric by name.
+	// Parameters:
+	//   - name: metric identifier
+	// Returns the float64 value or error if metric doesn't exist or is not a gauge.
 	GetGauge(name string) (float64, error)
+
+	// GetCounter retrieves a counter metric by name.
+	// Parameters:
+	//   - name: metric identifier
+	// Returns the int64 value or error if metric doesn't exist or is not a counter.
 	GetCounter(name string) (int64, error)
+
+	// GetAll returns all stored metrics as a map.
+	// Key: metric ID, Value: pointer to Metrics struct.
+	// Returns error if retrieval fails.
 	GetAll() (map[string]*models.Metrics, error)
 }
 
+// MemStorage is an in-memory implementation of Storage interface.
+// It stores metrics in a thread-safe map and optionally persists them to a file.
+// MemStorage supports:
+//   - Gauge metrics: floating-point values that can be set to any value
+//   - Counter metrics: integer values that accumulate (add to existing)
+//   - Automatic periodic persistence to JSON file
+//   - Synchronous persistence option (storeInterval = 0)
 type MemStorage struct {
 	mu        *sync.Mutex
 	metrics   map[string]*models.Metrics
@@ -27,6 +68,15 @@ type MemStorage struct {
 	syncWrite bool
 }
 
+// NewMemStorage creates a new in-memory storage backend for metrics.
+// Parameters:
+//   - filePath: Path to JSON file for persistence (empty string = no persistence)
+//   - storeInterval: Interval for automatic saves (0 = sync on every update)
+//
+// Returns a fully initialized MemStorage ready for use.
+// If filePath is non-empty and the file exists, metrics will be loaded from it on next access.
+// If storeInterval is 0, metrics are persisted synchronously after each update.
+// If storeInterval > 0, metrics are persisted periodically (StartAutoSave must be called).
 func NewMemStorage(filePath string, storeInterval time.Duration) *MemStorage {
 	return &MemStorage{
 		mu:        &sync.Mutex{},
@@ -36,6 +86,13 @@ func NewMemStorage(filePath string, storeInterval time.Duration) *MemStorage {
 	}
 }
 
+// Update updates or creates a metric in memory by its type and name.
+//
+// If the metric type is unsupported or the value cannot be parsed,
+// an error is returned.
+//
+// When syncWrite is enabled and filePath is set, the storage is
+// automatically persisted to disk after the update.
 func (s *MemStorage) Update(metricType, name, value string) error {
 	switch metricType {
 	case models.Gauge:
@@ -80,6 +137,9 @@ func (s *MemStorage) Update(metricType, name, value string) error {
 	return nil
 }
 
+// GetGauge retrieves a gauge metric by name.
+// Returns the float64 value if the metric exists.
+// Returns an error if the metric does not exist or is not a gauge.
 func (s *MemStorage) GetGauge(name string) (float64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -91,6 +151,9 @@ func (s *MemStorage) GetGauge(name string) (float64, error) {
 	return *m.Value, nil
 }
 
+// GetCounter retrieves a counter metric by name.
+// Returns the int64 value if the metric exists.
+// Returns an error if the metric does not exist or is not a counter.
 func (s *MemStorage) GetCounter(name string) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -102,6 +165,9 @@ func (s *MemStorage) GetCounter(name string) (int64, error) {
 	return *m.Delta, nil
 }
 
+// GetAll returns a copy of all stored metrics.
+// Each metric is copied to prevent external modification of internal storage.
+// Returns a map where the key is the metric ID and the value is a pointer to Metrics.
 func (s *MemStorage) GetAll() (map[string]*models.Metrics, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -114,6 +180,14 @@ func (s *MemStorage) GetAll() (map[string]*models.Metrics, error) {
 	return result, nil
 }
 
+// SaveToFile persists all metrics to a JSON file.
+// The file is created/overwritten with all current metrics.
+// This method is thread-safe and acquires the storage mutex.
+//
+// Parameters:
+//   - filePath: Path where metrics will be saved
+//
+// Returns error if file cannot be created or written to.
 func (s *MemStorage) SaveToFile(filePath string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -137,6 +211,15 @@ func (s *MemStorage) SaveToFile(filePath string) error {
 	return json.NewEncoder(file).Encode(data)
 }
 
+// LoadFromFile loads metrics from a JSON file into storage.
+// If the file doesn't exist, returns nil (no error).
+// This method is thread-safe and acquires the storage mutex.
+//
+// Parameters:
+//   - filePath: Path to the JSON file containing metrics
+//
+// Returns error if file exists but cannot be read, or JSON is invalid.
+// Returns nil if file doesn't exist (common on first startup).
 func (s *MemStorage) LoadFromFile(filePath string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -162,6 +245,21 @@ func (s *MemStorage) LoadFromFile(filePath string) error {
 	return nil
 }
 
+// StartAutoSave starts a background goroutine that periodically saves metrics to file.
+// If interval <= 0, saves immediately and returns without starting background task.
+// If interval > 0, creates a ticker that saves metrics at the specified interval.
+// The goroutine continues until stopCh is closed.
+//
+// Parameters:
+//   - filePath: Path where metrics will be saved
+//   - interval: Duration between saves (0 = save immediately and stop)
+//   - stopCh: Channel to signal goroutine to stop
+//
+// Typical usage:
+//
+//	stopCh := make(chan struct{})
+//	defer close(stopCh)
+//	storage.StartAutoSave("metrics.json", 15*time.Second, stopCh)
 func (s *MemStorage) StartAutoSave(filePath string, interval time.Duration, stopCh <-chan struct{}) {
 	if interval <= 0 {
 		_ = s.SaveToFile(filePath)
@@ -182,6 +280,11 @@ func (s *MemStorage) StartAutoSave(filePath string, interval time.Duration, stop
 	}()
 }
 
+// UpdateBatch updates multiple metrics at once.
+// For gauge metrics: replaces the value with the last value in the batch.
+// For counter metrics: adds deltas to existing values.
+// Invalid metrics (empty ID or unknown type) are skipped.
+// If MemStorage is in synchronous mode and filePath is set, changes are persisted immediately.
 func (s *MemStorage) UpdateBatch(batch []models.Metrics) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -196,25 +299,24 @@ func (s *MemStorage) UpdateBatch(batch []models.Metrics) error {
 			if m.Value == nil {
 				continue
 			}
-			v := *m.Value
 			s.metrics[m.ID] = &models.Metrics{
 				ID:    m.ID,
 				MType: models.Gauge,
-				Value: &v,
+				Value: m.Value,
 			}
 
 		case models.Counter:
 			if m.Delta == nil {
 				continue
 			}
-			d := *m.Delta
+			newDelta := *m.Delta
 			if ex, ok := s.metrics[m.ID]; ok && ex.Delta != nil {
-				d += *ex.Delta
+				newDelta += *ex.Delta
 			}
 			s.metrics[m.ID] = &models.Metrics{
 				ID:    m.ID,
 				MType: models.Counter,
-				Delta: &d,
+				Delta: &newDelta,
 			}
 		}
 	}

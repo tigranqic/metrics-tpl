@@ -14,6 +14,13 @@ type HashMiddleware struct {
 	Log *zap.Logger
 }
 
+type responseRecorder struct {
+	http.ResponseWriter
+	body   *bytes.Buffer
+	status int
+	header http.Header
+}
+
 func NewHashMiddleware(key string, log *zap.Logger) *HashMiddleware {
 	return &HashMiddleware{Key: key, Log: log}
 }
@@ -75,13 +82,6 @@ func (m *HashMiddleware) Handle(next http.Handler) http.Handler {
 			m.Log.Error("failed to write response", zap.Error(err))
 		}
 	})
-}
-
-type responseRecorder struct {
-	http.ResponseWriter
-	body   *bytes.Buffer
-	status int
-	header http.Header
 }
 
 func (r *responseRecorder) Header() http.Header {

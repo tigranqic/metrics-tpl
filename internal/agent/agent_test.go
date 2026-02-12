@@ -231,6 +231,135 @@ func TestSendMetricWithoutKey_NoHash(t *testing.T) {
 	}
 }
 
+func TestAgentRunStopsGracefully(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewAgent(server.URL, 100*time.Millisecond, 100*time.Millisecond, "", 2)
+
+	stop := make(chan struct{})
+
+	go a.Run(stop)
+
+	time.Sleep(300 * time.Millisecond)
+
+	a.mu.Lock()
+	metricsCount := len(a.metrics)
+	a.mu.Unlock()
+
+	if metricsCount == 0 {
+		t.Errorf("expected some metrics to be collected, got %d", metricsCount)
+	}
+
+	close(stop)
+
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestSendWorkerProcessesMetrics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewAgent(server.URL, 1, 1, "", 1)
+	stop := make(chan struct{})
+	go a.sendWorker(stop)
+
+	metric := models.Metrics{ID: "TestMetric", MType: "gauge", Value: ptrFloat64(123)}
+	a.sendCh <- metric
+
+	time.Sleep(50 * time.Millisecond)
+	close(stop)
+}
+
+func TestCollectSystemMetrics(t *testing.T) {
+	a := NewAgent("", 10*time.Millisecond, 10*time.Millisecond, "", 1)
+	stop := make(chan struct{})
+	go a.collectSystemMetrics(stop)
+	time.Sleep(50 * time.Millisecond)
+	close(stop)
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.metrics["TotalMemory"]; !ok {
+		t.Error("expected TotalMemory metric to be collected")
+	}
+	if _, ok := a.metrics["CPUutilization1"]; !ok {
+		t.Error("expected CPUutilization1 metric to be collected")
+	}
+}
+
+func TestSendMetricInvalidValue(t *testing.T) {
+	a := NewAgent("", 1, 1, "", 1)
+	err := a.sendMetric("gauge", "Alloc", "notanumber")
+	if err == nil {
+		t.Error("expected error for invalid gauge value")
+	}
+	err = a.sendMetric("counter", "PollCount", "abc")
+	if err == nil {
+		t.Error("expected error for invalid counter value")
+	}
+}
+
+func TestSendBatchSuccess(t *testing.T) {
+	sent := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewAgent(server.URL, 1, 1, "", 5)
+
+	metrics := []models.Metrics{
+		{ID: "Alloc", MType: "gauge", Value: ptrFloat64(100)},
+	}
+
+	err := a.sendBatch(metrics)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !sent {
+		t.Errorf("expected batch to be sent")
+	}
+}
+
+func TestRunServerNotAvailable(t *testing.T) {
+	a := NewAgent("http://127.0.0.1:59999", 10*time.Millisecond, 10*time.Millisecond, "", 1)
+	stop := make(chan struct{})
+	go a.Run(stop)
+
+	time.Sleep(50 * time.Millisecond)
+	close(stop)
+}
+
+func TestSendMetricGzipWriteError(t *testing.T) {
+	a := NewAgent("", 1, 1, "", 1)
+
+	err := a.sendMetric("gauge", "Alloc", "NaN")
+	if err == nil {
+		t.Errorf("expected error due to invalid value")
+	}
+}
+
+func TestSendWorkerClosedChannel(t *testing.T) {
+	a := NewAgent("", 1, 1, "", 1)
+	stop := make(chan struct{})
+
+	go a.sendWorker(stop)
+	close(stop)
+	time.Sleep(10 * time.Millisecond)
+}
+
 func ptrFloat64(f float64) *float64 { return &f }
 
 func TestMain(m *testing.M) {

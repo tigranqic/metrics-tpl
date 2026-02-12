@@ -22,6 +22,8 @@ type Config struct {
 	DatabaseDSN     string
 	Key             string
 	RateLimit       int
+	AuditFile       string
+	AuditURL        string
 }
 
 const (
@@ -36,35 +38,6 @@ const (
 	DefaultDBDSN           = "postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
 	DefaultRateLimit       = 5
 )
-
-func getenvInt(key string, def int) (int, bool) {
-	if val := os.Getenv(key); val != "" {
-		if n, err := strconv.Atoi(val); err == nil && n > 0 {
-			return n, true
-		}
-	}
-	return def, false
-}
-
-func getenvString(key string, def string) (string, bool) {
-	if val := os.Getenv(key); val != "" {
-		return val, true
-	}
-	return def, false
-}
-
-func getenvBool(key string, def bool) (bool, bool) {
-	if val := os.Getenv(key); val != "" {
-		v := strings.ToLower(val)
-		if v == "true" || v == "1" {
-			return true, true
-		}
-		if v == "false" || v == "0" {
-			return false, true
-		}
-	}
-	return def, false
-}
 
 func Load(isAgent bool) (*Config, error) {
 	chooseString := func(envVal string, envSet bool, flagVal string, def string) string {
@@ -103,6 +76,8 @@ func Load(isAgent bool) (*Config, error) {
 	envDBDSN, envDBDSNSet := getenvString("DATABASE_DSN", "")
 	envKey, envKeySet := getenvString("KEY", "")
 	envRateLimit, envRateLimitSet := getenvInt("RATE_LIMIT", DefaultRateLimit)
+	envAuditFile, envAuditFileSet := getenvString("AUDIT_FILE", "")
+	envAuditURL, envAuditURLSet := getenvString("AUDIT_URL", "")
 
 	logLevel := flag.String("log-level", DefaultLogLevel, "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", DefaultLogFormat, "Log format: text or json")
@@ -113,6 +88,8 @@ func Load(isAgent bool) (*Config, error) {
 	dbDSNFlag := flag.String("d", "", "Database DSN connection string")
 	keyFlag := flag.String("k", "", "Key for hash")
 	rateLimitFlag := flag.Int("l", DefaultRateLimit, "Rate limit")
+	auditFileFlag := flag.String("audit-file", "", "file to write audit")
+	auditURLFlag := flag.String("audit-url", "", "url to send audit")
 
 	var reportFlag *int
 	var restoreFlag *bool
@@ -142,6 +119,8 @@ func Load(isAgent bool) (*Config, error) {
 	databaseDSN := chooseString(envDBDSN, envDBDSNSet, *dbDSNFlag, "")
 	key := chooseString(envKey, envKeySet, *keyFlag, "")
 	rateLimit := chooseInt(envRateLimit, envRateLimitSet, *rateLimitFlag, DefaultRateLimit)
+	auditFile := chooseString(envAuditFile, envAuditFileSet, *auditFileFlag, "")
+	auditURL := chooseString(envAuditURL, envAuditURLSet, *auditURLFlag, "")
 
 	if reportInterval <= 0 {
 		return nil, errors.New("report interval must be greater than zero")
@@ -170,5 +149,36 @@ func Load(isAgent bool) (*Config, error) {
 		DatabaseDSN:     databaseDSN,
 		Key:             key,
 		RateLimit:       rateLimit,
+		AuditFile:       auditFile,
+		AuditURL:        auditURL,
 	}, nil
+}
+
+func getenvInt(key string, def int) (int, bool) {
+	if val := os.Getenv(key); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			return n, true
+		}
+	}
+	return def, false
+}
+
+func getenvString(key string, def string) (string, bool) {
+	if val := os.Getenv(key); val != "" {
+		return val, true
+	}
+	return def, false
+}
+
+func getenvBool(key string, def bool) (bool, bool) {
+	if val := os.Getenv(key); val != "" {
+		v := strings.ToLower(val)
+		if v == "true" || v == "1" {
+			return true, true
+		}
+		if v == "false" || v == "0" {
+			return false, true
+		}
+	}
+	return def, false
 }

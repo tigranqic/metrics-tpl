@@ -12,6 +12,12 @@ MIGRATIONS_DIR=./migrations
 GOOSE_BIN=goose
 PG_DSN=${DATABASE_DSN}
 
+STATICTEST_BIN=./statictest-darwin-arm64
+
+GODOC_PORT ?= 8089
+GODOC_TMP ?= /tmp/godoc
+MODULE_NAME := metrics-tpl
+
 .PHONY: all build test clean fmt vet lint help
 
 all: build test
@@ -41,8 +47,19 @@ clean:
 fmt:
 	go fmt ./...
 
-vet:
-	go vet ./...
+download-statictest:
+	@if [ ! -f $(STATICTEST_BIN) ]; then \
+		echo "statictest binary not found. Downloading..."; \
+		@mkdir -p .tools; \
+		curl -sSL https://github.com/Yandex-Practicum/go-autotests/releases/latest/download/statictest-darwin-arm64 -o $(STATICTEST_BIN); \
+		chmod +x $(STATICTEST_BIN); \
+	else \
+		echo "Using local statictest binary..."; \
+	fi
+
+vet: download-statictest
+	@echo "Running go vet with statictest..."
+	go vet -vettool=$(STATICTEST_BIN) ./...
 
 lint:
 	golangci-lint run
@@ -57,10 +74,10 @@ help:
 	@echo "  make lint            - Run golangci-lint (optional)"
 
 run-server:
-	$(SERVER_BIN) -a=localhost:8080
+	$(SERVER_BIN) -a=localhost:8080 --audit-file=audit
 
 run-agent:
-	$(AGENT_BIN) -a=http://localhost:8080 -R=10 -p=2
+	$(AGENT_BIN) -a=http://localhost:8080 -r=10 -p=2
 
 migrate-new:
 	@echo "Creating new migration: $(name)"
@@ -81,3 +98,52 @@ migrate-fix:
 
 migrate-status:
 	$(GOOSE_BIN) -dir $(MIGRATIONS_DIR) postgres "$(PG_DSN)" status
+
+cover:
+	./covertest-darwin-arm64 ./...
+
+check-fmt:
+	@echo "Checking code formatting with gofmt..."
+	@if [ -n "$$(gofmt -l .)" ]; then \
+		echo "The following files are not properly formatted:"; \
+		gofmt -l .; \
+		exit 1; \
+	else \
+		echo "All files are properly formatted."; \
+	fi
+
+check-imports:
+	@echo "Checking imports with goimports..."
+	@if [ -n "$$(goimports -l .)" ]; then \
+		echo "The following files have import issues:"; \
+		goimports -l .; \
+		exit 1; \
+	else \
+		echo "All imports are correct."; \
+	fi
+
+check: check-fmt check-imports
+	@echo "Code formatting and imports are OK ✅"
+
+fmt-all:
+	gofmt -w .
+	goimports -w .
+	@echo "Code and imports formatted ✅"
+
+GODOC_PORT ?= 8089
+MODULE_NAME := metrics-tpl
+
+godoc:
+	@TMP_DIR=$$(mktemp -d /tmp/godoc-XXXXXX); \
+	echo "Using temp dir: $$TMP_DIR"; \
+	mkdir -p $$TMP_DIR/src/$(MODULE_NAME); \
+	rsync -a \
+		--exclude .git \
+		--exclude vendor \
+		./ $$TMP_DIR/src/$(MODULE_NAME); \
+	echo "Starting godoc at http://localhost:$(GODOC_PORT)"; \
+	GO111MODULE=off \
+	GOMOD=/dev/null \
+	GOPATH=$$TMP_DIR \
+	GOCACHE=$$TMP_DIR/cache \
+	godoc -http=:$(GODOC_PORT)
