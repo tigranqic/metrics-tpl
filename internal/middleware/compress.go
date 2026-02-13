@@ -1,3 +1,6 @@
+// Package middleware provides HTTP middleware for request and response processing.
+// It includes gzip compression and decompression handlers that transparently
+// compress responses and decompress requests based on HTTP headers.
 package middleware
 
 import (

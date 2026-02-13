@@ -1,3 +1,7 @@
+// Package config provides loading and parsing of application configuration
+// from environment variables, command-line flags, and default values.
+// It supports both agent and server modes and handles intervals, storage paths,
+// logging settings, database DSNs, audit configuration, and rate limits.
 package config
 
 import (

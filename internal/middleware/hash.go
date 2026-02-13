@@ -1,3 +1,9 @@
+// Package middleware provides HTTP middleware for request and response processing.
+// It includes hash-based integrity verification middleware that:
+//   - Validates incoming request bodies against a SHA256 hash header.
+//   - Computes and sets a SHA256 hash header for response bodies.
+//
+// This ensures data integrity between clients and the server.
 package middleware
 
 import (

@@ -1,3 +1,7 @@
+// Package pgerrors provides utilities for classifying PostgreSQL errors.
+// It allows distinguishing between retriable errors (e.g., connection issues,
+// transaction rollbacks, serialization failures) and non-retriable errors
+// (e.g., unique constraint violations, foreign key violations).
 package pgerrors
 
 import (
