@@ -20,15 +20,30 @@ MODULE_NAME := metrics-tpl
 
 LINTER_BIN := ./linter
 
+VERSION := 1.0.0
+DATE := $(shell date +%Y-%m-%d)
+COMMIT := $(shell git rev-parse --short HEAD)
+
+GODOC_PORT ?= 8089
+MODULE_NAME := metrics-tpl
+
 .PHONY: all build test clean fmt vet lint help
 
 all: build test
 
 build-server:
-	go build -o $(SERVER_BIN) $(SERVER_DIR)/*.go
+	go build -ldflags "\
+	-X main.buildVersion=$(VERSION) \
+	-X main.buildDate=$(DATE) \
+	-X main.buildCommit=$(COMMIT)" \
+	-o $(SERVER_BIN) $(SERVER_DIR)/*.go
 
 build-agent:
-	go build -o $(AGENT_BIN) $(AGENT_DIR)/*.go
+	go build -ldflags "\
+	-X main.buildVersion=$(VERSION) \
+	-X main.buildDate=$(DATE) \
+	-X main.buildCommit=$(COMMIT)" \
+	-o $(AGENT_BIN) $(AGENT_DIR)/*.go
 
 build: build-server build-agent
 
@@ -84,7 +99,7 @@ help:
 	@echo "  make migrate-status   - Show migration status"
 	@echo "  make godoc            - Start godoc server for module documentation"
 	@echo "  make cover            - Run coverage tests with covertest"
-	
+
 run-server:
 	$(SERVER_BIN) -a=localhost:8080 --audit-file=audit
 
@@ -141,9 +156,6 @@ fmt-all:
 	gofmt -w .
 	goimports -w .
 	@echo "Code and imports formatted ✅"
-
-GODOC_PORT ?= 8089
-MODULE_NAME := metrics-tpl
 
 godoc:
 	@TMP_DIR=$$(mktemp -d /tmp/godoc-XXXXXX); \
