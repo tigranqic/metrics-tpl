@@ -31,15 +31,12 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	// Track which functions are main() in main package
 	mainFuncs := make(map[*ast.FuncDecl]bool)
 	if pass.Pkg.Name() == "main" {
-		for _, file := range pass.Files {
-			for _, decl := range file.Decls {
-				if fd, ok := decl.(*ast.FuncDecl); ok {
-					if fd.Name.Name == "main" {
-						mainFuncs[fd] = true
-					}
-				}
+		inspect.Preorder([]ast.Node{(*ast.FuncDecl)(nil)}, func(n ast.Node) {
+			fd := n.(*ast.FuncDecl)
+			if fd.Name.Name == "main" {
+				mainFuncs[fd] = true
 			}
-		}
+		})
 	}
 
 	inspect.Preorder(nodeFilter, func(node ast.Node) {
@@ -52,12 +49,12 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 
 		// Check for log.Fatal() or os.Exit() outside main
-		if pass.Pkg.Name() == "main" && !isInMainFunc(callExpr, mainFuncs, pass) {
-			if isLogFatalCall(callExpr) {
+		if pass.Pkg.Name() == "main" && !isInMainFunc(callExpr, mainFuncs) {
+			if isLogFatalCall(pass, callExpr) {
 				pass.Reportf(callExpr.Pos(), "log.Fatal() detected outside main function")
 				return
 			}
-			if isOsExitCall(callExpr) {
+			if isOsExitCall(pass, callExpr) {
 				pass.Reportf(callExpr.Pos(), "os.Exit() detected outside main function")
 				return
 			}
@@ -76,27 +73,53 @@ func isPanicCall(expr *ast.CallExpr) bool {
 }
 
 // isLogFatalCall checks if the call is to log.Fatal().
-func isLogFatalCall(expr *ast.CallExpr) bool {
-	if sel, ok := expr.Fun.(*ast.SelectorExpr); ok {
-		if ident, ok := sel.X.(*ast.Ident); ok {
-			return ident.Name == "log" && sel.Sel.Name == "Fatal"
-		}
+func isLogFatalCall(pass *analysis.Pass, expr *ast.CallExpr) bool {
+	sel, ok := expr.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
 	}
-	return false
+
+	if sel.Sel.Name != "Fatal" {
+		return false
+	}
+
+	obj, ok := pass.TypesInfo.Uses[sel.Sel]
+	if !ok {
+		return false
+	}
+
+	if obj.Pkg() == nil {
+		return false
+	}
+
+	return obj.Pkg().Path() == "log"
 }
 
 // isOsExitCall checks if the call is to os.Exit().
-func isOsExitCall(expr *ast.CallExpr) bool {
-	if sel, ok := expr.Fun.(*ast.SelectorExpr); ok {
-		if ident, ok := sel.X.(*ast.Ident); ok {
-			return ident.Name == "os" && sel.Sel.Name == "Exit"
-		}
+func isOsExitCall(pass *analysis.Pass, expr *ast.CallExpr) bool {
+	sel, ok := expr.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
 	}
-	return false
+
+	if sel.Sel.Name != "Exit" {
+		return false
+	}
+
+	obj, ok := pass.TypesInfo.Uses[sel.Sel]
+	if !ok {
+		return false
+	}
+
+	if obj.Pkg() == nil {
+		return false
+	}
+
+	return obj.Pkg().Path() == "os"
 }
 
 // isInMainFunc checks if a node is inside the main function.
-func isInMainFunc(node ast.Node, mainFuncs map[*ast.FuncDecl]bool, pass *analysis.Pass) bool {
+func isInMainFunc(node ast.Node, mainFuncs map[*ast.FuncDecl]bool) bool {
 	// For each main function, check if node is inside it
 	for mainFunc := range mainFuncs {
 		if nodeIsInside(mainFunc.Body, node) {

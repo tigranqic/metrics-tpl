@@ -28,6 +28,16 @@ func TestMainBadCode(t *testing.T) {
 	analysistest.Run(t, data, Analyzer, "mainbad")
 }
 
+func TestAliasImport(t *testing.T) {
+	data := getTestDataPath(t)
+	analysistest.Run(t, data, Analyzer, "aliasbad")
+}
+
+func TestAliasShadow(t *testing.T) {
+	data := getTestDataPath(t)
+	analysistest.Run(t, data, Analyzer, "aliasshadow")
+}
+
 func getTestDataPath(t *testing.T) string {
 	wd, err := os.Getwd()
 	if err != nil {

@@ -6,7 +6,6 @@ func (r *RequestContext) Reset() {
 	if r == nil {
 		return
 	}
-
 	r.userID = ""
 	r.timestamp = 0
 	if r.headers != nil {
