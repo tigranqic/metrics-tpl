@@ -1,3 +1,6 @@
+// Package hashutil provides utilities for hashing data.
+// It includes functions to compute SHA256 hashes with an optional secret key
+// for integrity verification or signature purposes.
 package hashutil
 
 import (

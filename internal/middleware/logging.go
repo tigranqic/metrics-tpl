@@ -1,3 +1,6 @@
+// Package middleware provides HTTP middleware for request and response processing.
+// It includes logging middleware that records details of HTTP requests and responses,
+// such as method, URI, status code, response size, and processing duration.
 package middleware
 
 import (

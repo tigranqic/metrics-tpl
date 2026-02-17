@@ -41,6 +41,16 @@ type Handler struct {
 	Audit *audit.Publisher   // Audit event publisher
 }
 
+// RequestContext represents the context of an HTTP request,
+// including the authenticated user ID, timestamp, headers, and URL parameters (test reset gen).
+// generate:reset
+type RequestContext struct {
+	userID    string
+	timestamp int64
+	headers   map[string]string
+	params    []string
+}
+
 // NewHandler creates a new Handler instance.
 // Parameters:
 //   - store: Storage implementation (MemStorage or PostgresStorage)

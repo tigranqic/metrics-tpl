@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -16,9 +17,20 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	buildVersion string = "N/A"
+	buildDate    string = "N/A"
+	buildCommit  string = "N/A"
+)
+
 // main initializes and runs the metrics agent, handling graceful shutdown.
 // It sets up logging, configuration, the agent instance, and optional pprof profiling.
 func main() {
+	// Print build information
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
+
 	// Load agent configuration
 	cfg, err := config.Load(true)
 	if err != nil {

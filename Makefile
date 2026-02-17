@@ -18,15 +18,32 @@ GODOC_PORT ?= 8089
 GODOC_TMP ?= /tmp/godoc
 MODULE_NAME := metrics-tpl
 
+LINTER_BIN := ./linter
+
+VERSION := 1.0.0
+DATE := $(shell date +%Y-%m-%d)
+COMMIT := $(shell git rev-parse --short HEAD)
+
+GODOC_PORT ?= 8089
+MODULE_NAME := metrics-tpl
+
 .PHONY: all build test clean fmt vet lint help
 
 all: build test
 
 build-server:
-	go build -o $(SERVER_BIN) $(SERVER_DIR)/*.go
+	go build -ldflags "\
+	-X main.buildVersion=$(VERSION) \
+	-X main.buildDate=$(DATE) \
+	-X main.buildCommit=$(COMMIT)" \
+	-o $(SERVER_BIN) $(SERVER_DIR)/*.go
 
 build-agent:
-	go build -o $(AGENT_BIN) $(AGENT_DIR)/*.go
+	go build -ldflags "\
+	-X main.buildVersion=$(VERSION) \
+	-X main.buildDate=$(DATE) \
+	-X main.buildCommit=$(COMMIT)" \
+	-o $(AGENT_BIN) $(AGENT_DIR)/*.go
 
 build: build-server build-agent
 
@@ -72,6 +89,16 @@ help:
 	@echo "  make fmt             - Format code"
 	@echo "  make vet             - Run 'go vet'"
 	@echo "  make lint            - Run golangci-lint (optional)"
+	@echo "  make lint-run        - Build and run custom linter"
+	@echo "  make staticcheck-run - Run staticcheck on all packages"
+	@echo "  make migrate-new name=NAME - Create new migration with given NAME"
+	@echo "  make migrate-up       - Apply all up migrations"
+	@echo "  make migrate-down     - Apply one down migration"
+	@echo "  make migrate-reset    - Reset all migrations"
+	@echo "  make migrate-fix      - Fix migration numbering"
+	@echo "  make migrate-status   - Show migration status"
+	@echo "  make godoc            - Start godoc server for module documentation"
+	@echo "  make cover            - Run coverage tests with covertest"
 
 run-server:
 	$(SERVER_BIN) -a=localhost:8080 --audit-file=audit
@@ -130,9 +157,6 @@ fmt-all:
 	goimports -w .
 	@echo "Code and imports formatted ✅"
 
-GODOC_PORT ?= 8089
-MODULE_NAME := metrics-tpl
-
 godoc:
 	@TMP_DIR=$$(mktemp -d /tmp/godoc-XXXXXX); \
 	echo "Using temp dir: $$TMP_DIR"; \
@@ -147,3 +171,13 @@ godoc:
 	GOPATH=$$TMP_DIR \
 	GOCACHE=$$TMP_DIR/cache \
 	godoc -http=:$(GODOC_PORT)
+
+build-linter:
+	go build -o $(LINTER_BIN) ./cmd/linter
+	chmod +x $(LINTER_BIN)
+
+lint-run: build-linter
+	$(LINTER_BIN) ./...
+
+staticcheck-run:
+	staticcheck ./...

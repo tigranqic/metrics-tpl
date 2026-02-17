@@ -1,6 +1,11 @@
+// Package logger provides initialization and access to a global Zap logger.
+// It supports configurable log levels and output formats (JSON or text),
+// and ensures a fallback to a no-op logger if initialization fails.
 package logger
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
 	"go.uber.org/zap"
@@ -27,7 +32,9 @@ func Init(levelStr, formatStr string) {
 	var err error
 	log, err = cfg.Build()
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
+		log = zap.NewNop()
+		return
 	}
 
 	log.Info("logger initialized",
