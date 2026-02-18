@@ -47,6 +47,14 @@ func main() {
 	// Create a new agent instance
 	a := agent.NewAgent(cfg.ServerAddr, cfg.PollInterval, cfg.ReportInterval, cfg.Key, cfg.RateLimit)
 
+	// Load crypto key if provided
+	if cfg.CryptoKey != "" {
+		if err := a.SetCryptoKey(cfg.CryptoKey); err != nil {
+			log.Error("failed to load crypto key", zap.Error(err))
+			os.Exit(1)
+		}
+	}
+
 	// Context to handle OS signals for graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

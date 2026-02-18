@@ -28,6 +28,7 @@ type Config struct {
 	RateLimit       int
 	AuditFile       string
 	AuditURL        string
+	CryptoKey       string
 }
 
 const (
@@ -82,6 +83,7 @@ func Load(isAgent bool) (*Config, error) {
 	envRateLimit, envRateLimitSet := getenvInt("RATE_LIMIT", DefaultRateLimit)
 	envAuditFile, envAuditFileSet := getenvString("AUDIT_FILE", "")
 	envAuditURL, envAuditURLSet := getenvString("AUDIT_URL", "")
+	envCryptoKey, envCryptoKeySet := getenvString("CRYPTO_KEY", "")
 
 	logLevel := flag.String("log-level", DefaultLogLevel, "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", DefaultLogFormat, "Log format: text or json")
@@ -94,6 +96,7 @@ func Load(isAgent bool) (*Config, error) {
 	rateLimitFlag := flag.Int("l", DefaultRateLimit, "Rate limit")
 	auditFileFlag := flag.String("audit-file", "", "file to write audit")
 	auditURLFlag := flag.String("audit-url", "", "url to send audit")
+	cryptoKeyFlag := flag.String("crypto-key", "", "Path to crypto key file (public key for agent, private key for server)")
 
 	var reportFlag *int
 	var restoreFlag *bool
@@ -125,6 +128,7 @@ func Load(isAgent bool) (*Config, error) {
 	rateLimit := chooseInt(envRateLimit, envRateLimitSet, *rateLimitFlag, DefaultRateLimit)
 	auditFile := chooseString(envAuditFile, envAuditFileSet, *auditFileFlag, "")
 	auditURL := chooseString(envAuditURL, envAuditURLSet, *auditURLFlag, "")
+	cryptoKey := chooseString(envCryptoKey, envCryptoKeySet, *cryptoKeyFlag, "")
 
 	if reportInterval <= 0 {
 		return nil, errors.New("report interval must be greater than zero")
@@ -155,6 +159,7 @@ func Load(isAgent bool) (*Config, error) {
 		RateLimit:       rateLimit,
 		AuditFile:       auditFile,
 		AuditURL:        auditURL,
+		CryptoKey:       cryptoKey,
 	}, nil
 }
 

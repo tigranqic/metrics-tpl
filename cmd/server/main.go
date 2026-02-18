@@ -15,6 +15,7 @@ import (
 	"github.com/tigranqic/metrics-tpl/internal/handler"
 	"github.com/tigranqic/metrics-tpl/internal/middleware"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
+	"github.com/tigranqic/metrics-tpl/pkg/cryptoutil"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 	"go.uber.org/zap"
 )
@@ -78,6 +79,17 @@ func main() {
 
 	// Create HTTP handler with middleware
 	h := handler.NewHandler(store, db, log, cfg.Key, auditPublisher)
+
+	// Load crypto key if provided
+	if cfg.CryptoKey != "" {
+		privKey, err := cryptoutil.LoadPrivateKey(cfg.CryptoKey)
+		if err != nil {
+			log.Error("failed to load private key", zap.Error(err))
+			os.Exit(1)
+		}
+		h.SetPrivateKey(privKey)
+	}
+
 	loggedHandler := middleware.LoggingMiddleware(log)(h.Router())
 
 	// Start pprof server in a separate goroutine
