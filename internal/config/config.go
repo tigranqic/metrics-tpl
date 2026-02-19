@@ -45,31 +45,68 @@ const (
 )
 
 func Load(isAgent bool) (*Config, error) {
-	chooseString := func(envVal string, envSet bool, flagVal string, def string) string {
-		if envSet {
+	chooseString := func(flagVal string, flagSet bool, envVal string, envSet bool, fileVal string, def string) string {
+		if envSet && envVal != "" {
 			return envVal
-		} else if flagVal != "" && flagVal != def {
+		}
+		if flagSet && flagVal != "" && flagVal != def {
 			return flagVal
+		}
+		if fileVal != "" {
+			return fileVal
 		}
 		return def
 	}
 
-	chooseInt := func(envVal int, envSet bool, flagVal int, def int) int {
-		if envSet {
+	chooseInt := func(flagVal int, flagSet bool, envVal int, envSet bool, fileVal int, def int) int {
+		if envSet && envVal != def {
 			return envVal
-		} else if flagVal != def {
+		}
+		if flagSet && flagVal != def {
 			return flagVal
+		}
+		if fileVal != 0 {
+			return fileVal
 		}
 		return def
 	}
 
-	chooseBool := func(envVal bool, envSet bool, flagVal bool, def bool) bool {
-		if envSet {
+	chooseBool := func(flagVal bool, flagSet bool, envVal bool, envSet bool, fileVal *bool, def bool) bool {
+		if envSet && envVal != def {
 			return envVal
-		} else if flagVal != def {
+		}
+		if flagSet && flagVal != def {
 			return flagVal
 		}
+		if fileVal != nil {
+			return *fileVal
+		}
 		return def
+	}
+
+	configPath := ""
+	if configEnv, ok := os.LookupEnv("CONFIG"); ok && configEnv != "" {
+		configPath = configEnv
+	}
+
+	for i, arg := range os.Args[1:] {
+		if (arg == "-c" || arg == "-config") && i+1 < len(os.Args)-1 {
+			configPath = os.Args[i+2]
+			break
+		}
+	}
+
+	// Load config file if specified
+	var fileConfig map[string]interface{}
+	if configPath != "" {
+		var err error
+		fileConfig, err = LoadFileConfig(configPath, isAgent)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if fileConfig == nil {
+		fileConfig = make(map[string]interface{})
 	}
 
 	envAddr, envAddrSet := getenvString("ADDRESS", DefaultServerAddr)
@@ -97,10 +134,14 @@ func Load(isAgent bool) (*Config, error) {
 	auditFileFlag := flag.String("audit-file", "", "file to write audit")
 	auditURLFlag := flag.String("audit-url", "", "url to send audit")
 	cryptoKeyFlag := flag.String("crypto-key", "", "Path to crypto key file (public key for agent, private key for server)")
+	_ = flag.String("c", "", "Path to configuration file (JSON format)")
+	_ = flag.String("config", "", "Path to configuration file (JSON format) - alternative to -c")
 
 	var reportFlag *int
 	var restoreFlag *bool
 	var reportVal int
+	var reportFlagSet bool
+
 	if isAgent {
 		reportFlag = flag.Int("r", DefaultReportInterval, "Report interval in seconds (agent)")
 		reportVal = *reportFlag
@@ -109,26 +150,60 @@ func Load(isAgent bool) (*Config, error) {
 	}
 
 	var restoreVal bool
+	var restoreFlagSet bool
 	if !isAgent {
 		restoreFlag = flag.Bool("r", DefaultRestore, "Restore metrics from file on startup (server)")
 		restoreVal = *restoreFlag
 	} else {
 		restoreVal = DefaultRestore
 	}
+
 	flag.Parse()
 
-	serverAddr := chooseString(envAddr, envAddrSet, *serverAddrFlag, DefaultServerAddr)
-	reportInterval := chooseInt(envReport, envReportSet, reportVal, DefaultReportInterval)
-	pollInterval := chooseInt(envPoll, envPollSet, *pollFlag, DefaultPollInterval)
-	storeInterval := chooseInt(envStore, envStoreSet, *storeFlag, DefaultStoreInterval)
-	fileStorage := chooseString(envFile, envFileSet, *fileFlag, DefaultFileStoragePath)
-	restore := chooseBool(envRestore, envRestoreSet, restoreVal, DefaultRestore)
-	databaseDSN := chooseString(envDBDSN, envDBDSNSet, *dbDSNFlag, "")
-	key := chooseString(envKey, envKeySet, *keyFlag, "")
-	rateLimit := chooseInt(envRateLimit, envRateLimitSet, *rateLimitFlag, DefaultRateLimit)
-	auditFile := chooseString(envAuditFile, envAuditFileSet, *auditFileFlag, "")
-	auditURL := chooseString(envAuditURL, envAuditURLSet, *auditURLFlag, "")
-	cryptoKey := chooseString(envCryptoKey, envCryptoKeySet, *cryptoKeyFlag, "")
+	// Determine which flags were actually set
+	flagSet := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) {
+		flagSet[f.Name] = true
+	})
+
+	reportFlagSet = flagSet["r"]
+	restoreFlagSet = flagSet["r"]
+
+	fileAddr := getStringFromConfig(fileConfig, "address")
+	fileReportStr := getStringFromConfig(fileConfig, "report_interval")
+	filePollStr := getStringFromConfig(fileConfig, "poll_interval")
+	fileStoreStr := getStringFromConfig(fileConfig, "store_interval")
+	fileStoreFile := getStringFromConfig(fileConfig, "store_file")
+	fileRestore := getBoolFromConfig(fileConfig, "restore")
+	fileDBDSN := getStringFromConfig(fileConfig, "database_dsn")
+	fileCryptoKey := getStringFromConfig(fileConfig, "crypto_key")
+
+	fileReport := parseIntervalFromConfig(fileReportStr)
+	filePoll := parseIntervalFromConfig(filePollStr)
+	fileStore := parseIntervalFromConfig(fileStoreStr)
+
+	serverAddr := chooseString(*serverAddrFlag, flagSet["a"], envAddr, envAddrSet, fileAddr, DefaultServerAddr)
+	reportInterval := chooseInt(reportVal, reportFlagSet, envReport, envReportSet, fileReport, DefaultReportInterval)
+	pollInterval := chooseInt(*pollFlag, flagSet["p"], envPoll, envPollSet, filePoll, DefaultPollInterval)
+	storeInterval := chooseInt(*storeFlag, flagSet["i"], envStore, envStoreSet, fileStore, DefaultStoreInterval)
+
+	fileStorage := chooseString(*fileFlag, flagSet["f"], envFile, envFileSet, fileStoreFile, DefaultFileStoragePath)
+	if fileStorage == DefaultFileStoragePath && fileStoreFile != "" && !flagSet["f"] && !envFileSet {
+		fileStorage = fileStoreFile
+	}
+
+	restorePtr := (*bool)(nil)
+	if fileRestore {
+		restorePtr = &fileRestore
+	}
+	restore := chooseBool(restoreVal, restoreFlagSet, envRestore, envRestoreSet, restorePtr, DefaultRestore)
+
+	databaseDSN := chooseString(*dbDSNFlag, flagSet["d"], envDBDSN, envDBDSNSet, fileDBDSN, "")
+	key := chooseString(*keyFlag, flagSet["k"], envKey, envKeySet, "", "")
+	rateLimit := chooseInt(*rateLimitFlag, flagSet["l"], envRateLimit, envRateLimitSet, 0, DefaultRateLimit)
+	auditFile := chooseString(*auditFileFlag, flagSet["audit-file"], envAuditFile, envAuditFileSet, "", "")
+	auditURL := chooseString(*auditURLFlag, flagSet["audit-url"], envAuditURL, envAuditURLSet, "", "")
+	cryptoKey := chooseString(*cryptoKeyFlag, flagSet["crypto-key"], envCryptoKey, envCryptoKeySet, fileCryptoKey, "")
 
 	if reportInterval <= 0 {
 		return nil, errors.New("report interval must be greater than zero")
@@ -190,4 +265,23 @@ func getenvBool(key string, def bool) (bool, bool) {
 		}
 	}
 	return def, false
+}
+
+func parseIntervalFromConfig(val string) int {
+	if val == "" {
+		return 0
+	}
+
+	// Try to parse as duration (e.g., "1s", "10s", "1m")
+	duration, err := time.ParseDuration(val)
+	if err == nil {
+		return int(duration.Seconds())
+	}
+
+	// Try to parse as plain number (seconds)
+	if n, err := strconv.Atoi(val); err == nil && n > 0 {
+		return n
+	}
+
+	return 0
 }
