@@ -84,8 +84,7 @@ func main() {
 	if cfg.CryptoKey != "" {
 		privKey, err := cryptoutil.LoadPrivateKey(cfg.CryptoKey)
 		if err != nil {
-			log.Error("failed to load private key", zap.Error(err))
-			os.Exit(1)
+			log.Fatal("failed to load private key", zap.Error(err))
 		}
 		h.SetPrivateKey(privKey)
 	}

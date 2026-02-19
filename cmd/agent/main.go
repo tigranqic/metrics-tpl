@@ -50,8 +50,7 @@ func main() {
 	// Load crypto key if provided
 	if cfg.CryptoKey != "" {
 		if err := a.SetCryptoKey(cfg.CryptoKey); err != nil {
-			log.Error("failed to load crypto key", zap.Error(err))
-			os.Exit(1)
+			log.Fatal("failed to load crypto key", zap.Error(err))
 		}
 	}
 
