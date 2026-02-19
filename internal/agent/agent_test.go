@@ -270,6 +270,7 @@ func TestSendWorkerProcessesMetrics(t *testing.T) {
 
 	a := NewAgent(server.URL, 1, 1, "", 1)
 	stop := make(chan struct{})
+	a.workerWg.Add(1)
 	go a.sendWorker(stop)
 
 	metric := models.Metrics{ID: "TestMetric", MType: "gauge", Value: ptrFloat64(123)}
@@ -355,9 +356,11 @@ func TestSendWorkerClosedChannel(t *testing.T) {
 	a := NewAgent("", 1, 1, "", 1)
 	stop := make(chan struct{})
 
+	a.workerWg.Add(1)
 	go a.sendWorker(stop)
 	close(stop)
-	time.Sleep(10 * time.Millisecond)
+
+	a.workerWg.Wait()
 }
 
 func ptrFloat64(f float64) *float64 { return &f }

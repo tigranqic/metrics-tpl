@@ -6,6 +6,7 @@ package agent
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
@@ -53,8 +54,10 @@ type Agent struct {
 	metrics map[string]string
 	log     *zap.Logger
 
-	sendCh chan models.Metrics
-	mu     sync.Mutex
+	sendCh     chan models.Metrics
+	mu         sync.Mutex
+	workerWg   sync.WaitGroup
+	shutdownCh chan struct{}
 }
 
 // NewAgent creates a new Agent with the given server URL, poll and report intervals,
@@ -81,6 +84,7 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, key 
 		Key:            key,
 		RateLimit:      rateLimit,
 		sendCh:         make(chan models.Metrics, rateLimit),
+		shutdownCh:     make(chan struct{}),
 	}
 }
 
@@ -115,7 +119,9 @@ func (a *Agent) Run(stop <-chan struct{}) {
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
+	// Start send workers with WaitGroup tracking
 	for i := 0; i < a.RateLimit; i++ {
+		a.workerWg.Add(1)
 		go a.sendWorker(stop)
 	}
 
@@ -162,8 +168,12 @@ func (a *Agent) Run(stop <-chan struct{}) {
 }
 
 // sendWorker continuously reads metrics from the sendCh channel and sends them
-// to the server until a stop signal is received.
+// to the server until a graceful shutdown is signaled.
+// During graceful shutdown, it drains the channel and sends all remaining metrics
+// before exiting.
 func (a *Agent) sendWorker(stop <-chan struct{}) {
+	defer a.workerWg.Done()
+
 	for {
 		select {
 		case m := <-a.sendCh:
@@ -171,7 +181,20 @@ func (a *Agent) sendWorker(stop <-chan struct{}) {
 				a.log.Error("metric send failed", zap.Error(err))
 			}
 		case <-stop:
-			return
+			// Graceful shutdown: drain remaining metrics from channel
+			a.log.Debug("worker received stop signal, draining remaining metrics")
+			for {
+				select {
+				case m := <-a.sendCh:
+					if err := a.sendSingle(m); err != nil {
+						a.log.Error("metric send failed during shutdown", zap.Error(err))
+					}
+				default:
+					// Channel is empty, exit the worker
+					a.log.Debug("worker finished draining metrics, exiting")
+					return
+				}
+			}
 		}
 	}
 }
@@ -429,6 +452,23 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 
 	a.log.Info("batch sent", zap.Int("count", len(metrics)), zap.Int("status", resp.StatusCode), zap.Duration("duration", duration))
 	return nil
+}
+
+// WaitForShutdown waits for all worker goroutines to complete or for the context to be canceled.
+func (a *Agent) WaitForShutdown(ctx context.Context) {
+	done := make(chan struct{})
+
+	go func() {
+		a.workerWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		a.log.Info("all workers finished sending metrics")
+	case <-ctx.Done():
+		a.log.Warn("shutdown timeout reached before all workers finished")
+	}
 }
 
 // waitForServer waits until the server health endpoint responds OK or the timeout expires.
