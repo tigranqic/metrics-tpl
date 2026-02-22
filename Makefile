@@ -106,6 +106,12 @@ run-server:
 run-agent:
 	$(AGENT_BIN) -a=http://localhost:8080 -r=10 -p=2
 
+run-server-crypto:
+	$(SERVER_BIN) -a=localhost:8080 --audit-file=audit -crypto-key=./test_private.pem
+
+run-agent-crypto:
+	$(AGENT_BIN) -a=http://localhost:8080 -r=10 -p=2 -crypto-key=./test_public.pem
+
 migrate-new:
 	@echo "Creating new migration: $(name)"
 	$(GOOSE_BIN) -dir $(MIGRATIONS_DIR) create $(name) sql
@@ -181,3 +187,7 @@ lint-run: build-linter
 
 staticcheck-run:
 	staticcheck ./...
+
+generate-keys:
+	openssl genrsa -out test_private.pem 2048
+	openssl rsa -in test_private.pem -pubout -out test_public.pem

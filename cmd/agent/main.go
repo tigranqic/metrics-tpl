@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "net/http/pprof"
 
@@ -47,8 +48,15 @@ func main() {
 	// Create a new agent instance
 	a := agent.NewAgent(cfg.ServerAddr, cfg.PollInterval, cfg.ReportInterval, cfg.Key, cfg.RateLimit)
 
+	// Load crypto key if provided
+	if cfg.CryptoKey != "" {
+		if err := a.SetCryptoKey(cfg.CryptoKey); err != nil {
+			log.Fatal("failed to load crypto key", zap.Error(err))
+		}
+	}
+
 	// Context to handle OS signals for graceful shutdown
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stop()
 
 	// Channel to signal agent to stop
@@ -68,10 +76,17 @@ func main() {
 
 	// Wait for termination signal
 	<-ctx.Done()
-	log.Info("received termination signal, shutting down")
+	log.Info("received termination signal, starting graceful shutdown")
 
-	// Signal agent to stop
+	// Signal agent to stop collecting and reporting new metrics
 	close(agentStop)
+
+	// Give workers time to drain the metrics channel and send all pending metrics
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	// Wait for all workers to finish or timeout
+	a.WaitForShutdown(shutdownCtx)
 
 	log.Info("agent stopped gracefully")
 }

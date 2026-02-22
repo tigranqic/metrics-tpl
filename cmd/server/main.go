@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	_ "net/http/pprof"
 
@@ -15,6 +19,7 @@ import (
 	"github.com/tigranqic/metrics-tpl/internal/handler"
 	"github.com/tigranqic/metrics-tpl/internal/middleware"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
+	"github.com/tigranqic/metrics-tpl/pkg/cryptoutil"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 	"go.uber.org/zap"
 )
@@ -78,20 +83,65 @@ func main() {
 
 	// Create HTTP handler with middleware
 	h := handler.NewHandler(store, db, log, cfg.Key, auditPublisher)
+
+	// Load crypto key if provided
+	if cfg.CryptoKey != "" {
+		privKey, err := cryptoutil.LoadPrivateKey(cfg.CryptoKey)
+		if err != nil {
+			log.Fatal("failed to load private key", zap.Error(err))
+		}
+		h.SetPrivateKey(privKey)
+	}
+
 	loggedHandler := middleware.LoggingMiddleware(log)(h.Router())
+
+	// Create HTTP server with proper shutdown configuration
+	server := &http.Server{
+		Addr:              cfg.ServerAddr,
+		Handler:           loggedHandler,
+		ReadTimeout:       time.Duration(cfg.ReadTimeout) * time.Second,
+		WriteTimeout:      time.Duration(cfg.WriteTimeout) * time.Second,
+		IdleTimeout:       time.Duration(cfg.IdleTimeout) * time.Second,
+		ReadHeaderTimeout: time.Duration(cfg.ReadHeaderTimeout) * time.Second,
+	}
 
 	// Start pprof server in a separate goroutine
 	go func() {
-		log.Info("starting pprof server", zap.String("address", "localhost:6060"))
-		if err := http.ListenAndServe(":6065", nil); err != nil {
+		log.Info("starting pprof server", zap.String("address", "localhost:6065"))
+		if err := http.ListenAndServe(":6065", nil); err != nil && err != http.ErrServerClosed {
 			log.Error("pprof server failed", zap.Error(err))
 		}
 	}()
 
-	// Start main HTTP server
-	log.Info("starting HTTP server", zap.String("address", cfg.ServerAddr))
-	if err := http.ListenAndServe(cfg.ServerAddr, loggedHandler); err != nil {
-		log.Error("server stopped with error", zap.Error(err))
-		os.Exit(1)
+	// Set up signal handling for graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	defer stop()
+
+	// Start HTTP server in a separate goroutine
+	go func() {
+		log.Info("starting HTTP server", zap.String("address", cfg.ServerAddr))
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error("server error", zap.Error(err))
+		}
+	}()
+
+	// Wait for termination signal
+	<-ctx.Done()
+	log.Info("received termination signal, starting graceful shutdown")
+
+	// Create shutdown context with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	// Gracefully shutdown the HTTP server
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Error("server shutdown error", zap.Error(err))
 	}
+
+	// Ensure all unsaved data is persisted
+	if err := store.Shutdown(); err != nil {
+		log.Error("failed to shutdown storage", zap.Error(err))
+	}
+
+	log.Info("server stopped gracefully")
 }

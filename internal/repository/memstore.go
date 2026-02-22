@@ -52,6 +52,12 @@ type Storage interface {
 	// Key: metric ID, Value: pointer to Metrics struct.
 	// Returns error if retrieval fails.
 	GetAll() (map[string]*models.Metrics, error)
+
+	// Shutdown gracefully shuts down the storage, ensuring all unsaved data is persisted.
+	// This is called during server shutdown to ensure data consistency.
+	// For MemStorage: saves all metrics to file if configured
+	// For PostgresStorage: no-op (data is immediately persisted to database)
+	Shutdown() error
 }
 
 // MemStorage is an in-memory implementation of Storage interface.
@@ -325,4 +331,16 @@ func (s *MemStorage) UpdateBatch(batch []models.Metrics) error {
 		return s.SaveToFile(s.filePath)
 	}
 	return nil
+}
+
+// Shutdown gracefully shuts down the MemStorage, ensuring all unsaved data is persisted to file.
+// It saves all metrics to the configured file path if one was provided.
+// This should be called during server shutdown to ensure data consistency.
+func (s *MemStorage) Shutdown() error {
+	if s.filePath == "" {
+		return nil
+	}
+
+	// SaveToFile already acquires the mutex
+	return s.SaveToFile(s.filePath)
 }

@@ -237,3 +237,8 @@ func (s *PostgresStorage) UpdateBatch(batch []models.Metrics) error {
 
 	return tx.Commit()
 }
+
+// Shutdown gracefully shuts down the PostgresStorage.
+func (s *PostgresStorage) Shutdown() error {
+	return nil
+}

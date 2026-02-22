@@ -5,6 +5,7 @@
 package handler
 
 import (
+	"crypto/rsa"
 	"html/template"
 	"net/http"
 	"strconv"
@@ -34,11 +35,12 @@ import (
 //   - Notifying audit observers of metric updates
 //   - Applying middleware for compression and hash validation
 type Handler struct {
-	store repository.Storage // Storage backend (memory or PostgreSQL)
-	db    *sql.DB            // Database connection
-	log   *zap.Logger        // Logger instance
-	key   string             // Secret key for hash authentication
-	Audit *audit.Publisher   // Audit event publisher
+	store      repository.Storage // Storage backend (memory or PostgreSQL)
+	db         *sql.DB            // Database connection
+	log        *zap.Logger        // Logger instance
+	key        string             // Secret key for hash authentication
+	Audit      *audit.Publisher   // Audit event publisher
+	PrivateKey *rsa.PrivateKey    // Private key for RSA decryption
 }
 
 // RequestContext represents the context of an HTTP request,
@@ -76,6 +78,14 @@ func NewHandler(
 	}
 }
 
+// SetPrivateKey sets the private key for RSA decryption.
+func (h *Handler) SetPrivateKey(privKey *rsa.PrivateKey) {
+	h.PrivateKey = privKey
+	if privKey != nil {
+		h.log.Info("private key set for decryption")
+	}
+}
+
 // Router returns a configured http.Handler with all routes and middleware.
 // The router includes the following endpoints:
 //
@@ -90,6 +100,7 @@ func NewHandler(
 //
 // Middleware applied:
 //   - GzipDecompress: Decompresses gzip-encoded request bodies
+//   - DecryptionMiddleware: Decrypts RSA-encrypted request bodies if X-Encrypted header is present
 //   - HashMiddleware: Validates request signatures using HMAC-SHA256
 //   - GzipCompress: Compresses response bodies with gzip
 //
@@ -98,6 +109,7 @@ func (h *Handler) Router() http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.GzipDecompress)
+	r.Use(middleware.NewDecryptionMiddleware(h.PrivateKey, h.log))
 	r.Use(middleware.NewHashMiddleware(h.key, h.log).Handle)
 	r.Use(middleware.GzipCompress)
 

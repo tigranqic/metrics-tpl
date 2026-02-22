@@ -6,6 +6,8 @@ package agent
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -20,6 +22,7 @@ import (
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
 	models "github.com/tigranqic/metrics-tpl/internal/model"
+	"github.com/tigranqic/metrics-tpl/pkg/cryptoutil"
 	"github.com/tigranqic/metrics-tpl/pkg/hashutil"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 	"go.uber.org/zap"
@@ -42,6 +45,7 @@ type Agent struct {
 	ReportInterval time.Duration
 	Key            string
 	RateLimit      int
+	PublicKey      *rsa.PublicKey
 
 	pollCount             int64
 	lastReportedPollCount int64
@@ -50,12 +54,15 @@ type Agent struct {
 	metrics map[string]string
 	log     *zap.Logger
 
-	sendCh chan models.Metrics
-	mu     sync.Mutex
+	sendCh     chan models.Metrics
+	mu         sync.Mutex
+	workerWg   sync.WaitGroup
+	shutdownCh chan struct{}
 }
 
 // NewAgent creates a new Agent with the given server URL, poll and report intervals,
-// optional key for authentication, and a rate limit for concurrent metric reporting.
+// optional key for authentication, a rate limit for concurrent metric reporting,
+// and optional crypto key path for RSA encryption.
 func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, key string, rateLimit int) *Agent {
 	retryClient := retryablehttp.NewClient()
 	retryClient.RetryMax = 3
@@ -77,7 +84,24 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, key 
 		Key:            key,
 		RateLimit:      rateLimit,
 		sendCh:         make(chan models.Metrics, rateLimit),
+		shutdownCh:     make(chan struct{}),
 	}
+}
+
+// SetCryptoKey loads the public key from the provided path for RSA encryption.
+func (a *Agent) SetCryptoKey(keyPath string) error {
+	if keyPath == "" {
+		return nil
+	}
+
+	pubKey, err := cryptoutil.LoadPublicKey(keyPath)
+	if err != nil {
+		return fmt.Errorf("failed to load public key: %w", err)
+	}
+
+	a.PublicKey = pubKey
+	a.log.Info("loaded public key for encryption", zap.String("keyPath", keyPath))
+	return nil
 }
 
 // Run starts the main agent loop. It periodically collects metrics and sends them
@@ -95,7 +119,9 @@ func (a *Agent) Run(stop <-chan struct{}) {
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
+	// Start send workers with WaitGroup tracking
 	for i := 0; i < a.RateLimit; i++ {
+		a.workerWg.Add(1)
 		go a.sendWorker(stop)
 	}
 
@@ -142,8 +168,12 @@ func (a *Agent) Run(stop <-chan struct{}) {
 }
 
 // sendWorker continuously reads metrics from the sendCh channel and sends them
-// to the server until a stop signal is received.
+// to the server until a graceful shutdown is signaled.
+// During graceful shutdown, it drains the channel and sends all remaining metrics
+// before exiting.
 func (a *Agent) sendWorker(stop <-chan struct{}) {
+	defer a.workerWg.Done()
+
 	for {
 		select {
 		case m := <-a.sendCh:
@@ -151,7 +181,20 @@ func (a *Agent) sendWorker(stop <-chan struct{}) {
 				a.log.Error("metric send failed", zap.Error(err))
 			}
 		case <-stop:
-			return
+			// Graceful shutdown: drain remaining metrics from channel
+			a.log.Debug("worker received stop signal, draining remaining metrics")
+			for {
+				select {
+				case m := <-a.sendCh:
+					if err := a.sendSingle(m); err != nil {
+						a.log.Error("metric send failed during shutdown", zap.Error(err))
+					}
+				default:
+					// Channel is empty, exit the worker
+					a.log.Debug("worker finished draining metrics, exiting")
+					return
+				}
+			}
 		}
 	}
 }
@@ -271,6 +314,18 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 		hash = hashutil.CalcSHA256(body, a.Key)
 	}
 
+	// Encrypt if public key is available
+	encrypted := false
+	if a.PublicKey != nil {
+		encryptedBody, err := cryptoutil.Encrypt(body, a.PublicKey)
+		if err != nil {
+			a.log.Error("failed to encrypt metric", zap.Error(err))
+			return fmt.Errorf("encryption failed: %w", err)
+		}
+		body = encryptedBody
+		encrypted = true
+	}
+
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(body); err != nil {
@@ -289,6 +344,9 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 	req.Header.Set("Accept-Encoding", "gzip")
 	if hash != "" {
 		req.Header.Set("Hash", hash)
+	}
+	if encrypted {
+		req.Header.Set("X-Encrypted", "true")
 	}
 
 	start := time.Now()
@@ -328,6 +386,18 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 		hash = hashutil.CalcSHA256(body, a.Key)
 	}
 
+	// Encrypt if public key is available
+	encrypted := false
+	if a.PublicKey != nil {
+		encryptedBody, err := cryptoutil.Encrypt(body, a.PublicKey)
+		if err != nil {
+			a.log.Error("failed to encrypt batch", zap.Error(err))
+			return fmt.Errorf("encryption failed: %w", err)
+		}
+		body = encryptedBody
+		encrypted = true
+	}
+
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(body); err != nil {
@@ -343,6 +413,9 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 	req.Header.Set("Accept-Encoding", "gzip")
 	if hash != "" {
 		req.Header.Set("Hash", hash)
+	}
+	if encrypted {
+		req.Header.Set("X-Encrypted", "true")
 	}
 
 	start := time.Now()
@@ -379,6 +452,23 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 
 	a.log.Info("batch sent", zap.Int("count", len(metrics)), zap.Int("status", resp.StatusCode), zap.Duration("duration", duration))
 	return nil
+}
+
+// WaitForShutdown waits for all worker goroutines to complete or for the context to be canceled.
+func (a *Agent) WaitForShutdown(ctx context.Context) {
+	done := make(chan struct{})
+
+	go func() {
+		a.workerWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		a.log.Info("all workers finished sending metrics")
+	case <-ctx.Done():
+		a.log.Warn("shutdown timeout reached before all workers finished")
+	}
 }
 
 // waitForServer waits until the server health endpoint responds OK or the timeout expires.
