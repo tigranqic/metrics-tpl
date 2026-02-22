@@ -5,266 +5,150 @@
 package config
 
 import (
-	"errors"
 	"flag"
+	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ilyakaznacheev/cleanenv"
+)
+
+const (
+	DefaultServerAddr     = "localhost:8080"
+	DefaultReportInterval = 10
+	DefaultPollInterval   = 2
+	DefaultRateLimit      = 5
 )
 
 type Config struct {
-	LogLevel        string
-	LogFormat       string
-	ServerAddr      string
-	ReportInterval  time.Duration
-	PollInterval    time.Duration
-	IsAgent         bool
-	StoreInterval   time.Duration
-	FileStoragePath string
-	Restore         bool
-	DatabaseDSN     string
-	Key             string
-	RateLimit       int
-	AuditFile       string
-	AuditURL        string
-	CryptoKey       string
+	LogLevel          string        `yaml:"log_level" env:"LOG_LEVEL" env-default:"info"`
+	LogFormat         string        `yaml:"log_format" env:"LOG_FORMAT" env-default:"json"`
+	ServerAddr        string        `yaml:"address" env:"ADDRESS" env-default:"localhost:8080"`
+	ReportInterval    time.Duration `yaml:"report_interval" env:"REPORT_INTERVAL" env-default:"10s"`
+	PollInterval      time.Duration `yaml:"poll_interval" env:"POLL_INTERVAL" env-default:"2s"`
+	StoreInterval     time.Duration `yaml:"store_interval" env:"STORE_INTERVAL" env-default:"15s"`
+	FileStoragePath   string        `yaml:"store_file" env:"FILE_STORAGE_PATH" env-default:"metrics.json"`
+	Restore           bool          `yaml:"restore" env:"RESTORE" env-default:"false"`
+	DatabaseDSN       string        `yaml:"database_dsn" env:"DATABASE_DSN" env-default:"postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"`
+	Key               string        `yaml:"key" env:"KEY"`
+	RateLimit         int           `yaml:"rate_limit" env:"RATE_LIMIT" env-default:"5"`
+	AuditFile         string        `yaml:"audit_file" env:"AUDIT_FILE"`
+	AuditURL          string        `yaml:"audit_url" env:"AUDIT_URL"`
+	CryptoKey         string        `yaml:"crypto_key" env:"CRYPTO_KEY"`
+	ReadTimeout       time.Duration `yaml:"read_timeout" env:"READ_TIMEOUT" env-default:"10s"`
+	WriteTimeout      time.Duration `yaml:"write_timeout" env:"WRITE_TIMEOUT" env-default:"10s"`
+	IdleTimeout       time.Duration `yaml:"idle_timeout" env:"IDLE_TIMEOUT" env-default:"60s"`
+	ReadHeaderTimeout time.Duration `yaml:"read_header_timeout" env:"READ_HEADER_TIMEOUT" env-default:"5s"`
 }
 
-const (
-	DefaultLogLevel        = "info"
-	DefaultLogFormat       = "json"
-	DefaultServerAddr      = "localhost:8080"
-	DefaultReportInterval  = 10
-	DefaultPollInterval    = 2
-	DefaultStoreInterval   = 15
-	DefaultFileStoragePath = "metrics.json"
-	DefaultRestore         = false
-	DefaultDBDSN           = "postgres://postgres:postgres@localhost:15449/metrics-tpl?sslmode=disable"
-	DefaultRateLimit       = 5
-)
-
 func Load(isAgent bool) (*Config, error) {
-	chooseString := func(flagVal string, flagSet bool, envVal string, envSet bool, fileVal string, def string) string {
-		if envSet && envVal != "" {
-			return envVal
-		}
-		if flagSet && flagVal != "" && flagVal != def {
-			return flagVal
-		}
-		if fileVal != "" {
-			return fileVal
-		}
-		return def
-	}
+	fixEnvDurations()
 
-	chooseInt := func(flagVal int, flagSet bool, envVal int, envSet bool, fileVal int, def int) int {
-		if envSet && envVal != def {
-			return envVal
-		}
-		if flagSet && flagVal != def {
-			return flagVal
-		}
-		if fileVal != 0 {
-			return fileVal
-		}
-		return def
-	}
+	var cfg Config
 
-	chooseBool := func(flagVal bool, flagSet bool, envVal bool, envSet bool, fileVal *bool, def bool) bool {
-		if envSet && envVal != def {
-			return envVal
-		}
-		if flagSet && flagVal != def {
-			return flagVal
-		}
-		if fileVal != nil {
-			return *fileVal
-		}
-		return def
-	}
-
-	configPath := ""
-	if configEnv, ok := os.LookupEnv("CONFIG"); ok && configEnv != "" {
-		configPath = configEnv
-	}
-
-	for i, arg := range os.Args[1:] {
-		if (arg == "-c" || arg == "-config") && i+1 < len(os.Args)-1 {
-			configPath = os.Args[i+2]
-			break
+	configPath := os.Getenv("CONFIG")
+	if configPath == "" {
+		for i, arg := range os.Args {
+			if (arg == "-c" || arg == "-config") && i+1 < len(os.Args) {
+				configPath = os.Args[i+1]
+				break
+			}
 		}
 	}
 
-	// Load config file if specified
-	var fileConfig map[string]interface{}
 	if configPath != "" {
-		var err error
-		fileConfig, err = LoadFileConfig(configPath, isAgent)
-		if err != nil {
+		if err := cleanenv.ReadConfig(configPath, &cfg); err != nil {
+			return nil, fmt.Errorf("config file error: %w", err)
+		}
+	} else {
+		if err := cleanenv.ReadEnv(&cfg); err != nil {
 			return nil, err
 		}
 	}
-	if fileConfig == nil {
-		fileConfig = make(map[string]interface{})
-	}
 
-	envAddr, envAddrSet := getenvString("ADDRESS", DefaultServerAddr)
-	envReport, envReportSet := getenvInt("REPORT_INTERVAL", DefaultReportInterval)
-	envPoll, envPollSet := getenvInt("POLL_INTERVAL", DefaultPollInterval)
-	envStore, envStoreSet := getenvInt("STORE_INTERVAL", DefaultStoreInterval)
-	envFile, envFileSet := getenvString("FILE_STORAGE_PATH", DefaultFileStoragePath)
-	envRestore, envRestoreSet := getenvBool("RESTORE", DefaultRestore)
-	envDBDSN, envDBDSNSet := getenvString("DATABASE_DSN", "")
-	envKey, envKeySet := getenvString("KEY", "")
-	envRateLimit, envRateLimitSet := getenvInt("RATE_LIMIT", DefaultRateLimit)
-	envAuditFile, envAuditFileSet := getenvString("AUDIT_FILE", "")
-	envAuditURL, envAuditURLSet := getenvString("AUDIT_URL", "")
-	envCryptoKey, envCryptoKeySet := getenvString("CRYPTO_KEY", "")
+	fs := flag.NewFlagSet("metrics", flag.ContinueOnError)
+	fAddr := fs.String("a", cfg.ServerAddr, "")
+	fPoll := fs.Int("p", int(cfg.PollInterval.Seconds()), "")
+	fStore := fs.Int("i", int(cfg.StoreInterval.Seconds()), "")
+	fFile := fs.String("f", cfg.FileStoragePath, "")
+	fDSN := fs.String("d", cfg.DatabaseDSN, "")
+	fKey := fs.String("k", cfg.Key, "")
+	fLimit := fs.Int("l", cfg.RateLimit, "")
+	fCrypto := fs.String("crypto-key", cfg.CryptoKey, "")
 
-	logLevel := flag.String("log-level", DefaultLogLevel, "Log level: debug, info, warn, error")
-	logFormat := flag.String("log-format", DefaultLogFormat, "Log format: text or json")
-	serverAddrFlag := flag.String("a", DefaultServerAddr, "HTTP server address")
-	pollFlag := flag.Int("p", DefaultPollInterval, "Poll interval in seconds")
-	storeFlag := flag.Int("i", DefaultStoreInterval, "Interval in seconds to store metrics (0 = sync)")
-	fileFlag := flag.String("f", DefaultFileStoragePath, "File path for metrics storage")
-	dbDSNFlag := flag.String("d", "", "Database DSN connection string")
-	keyFlag := flag.String("k", "", "Key for hash")
-	rateLimitFlag := flag.Int("l", DefaultRateLimit, "Rate limit")
-	auditFileFlag := flag.String("audit-file", "", "file to write audit")
-	auditURLFlag := flag.String("audit-url", "", "url to send audit")
-	cryptoKeyFlag := flag.String("crypto-key", "", "Path to crypto key file (public key for agent, private key for server)")
-	_ = flag.String("c", "", "Path to configuration file (JSON format)")
-	_ = flag.String("config", "", "Path to configuration file (JSON format) - alternative to -c")
-
-	var reportFlag *int
-	var restoreFlag *bool
-	var reportVal int
-	var reportFlagSet bool
-
+	var fReport *int
+	var fRestore *bool
 	if isAgent {
-		reportFlag = flag.Int("r", DefaultReportInterval, "Report interval in seconds (agent)")
-		reportVal = *reportFlag
+		fReport = fs.Int("r", int(cfg.ReportInterval.Seconds()), "")
 	} else {
-		reportVal = DefaultReportInterval
+		fRestore = fs.Bool("r", cfg.Restore, "")
 	}
 
-	var restoreVal bool
-	var restoreFlagSet bool
-	if !isAgent {
-		restoreFlag = flag.Bool("r", DefaultRestore, "Restore metrics from file on startup (server)")
-		restoreVal = *restoreFlag
-	} else {
-		restoreVal = DefaultRestore
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		return nil, err
 	}
 
-	flag.Parse()
-
-	// Determine which flags were actually set
-	flagSet := make(map[string]bool)
-	flag.Visit(func(f *flag.Flag) {
-		flagSet[f.Name] = true
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "a":
+			cfg.ServerAddr = *fAddr
+		case "p":
+			cfg.PollInterval = time.Duration(*fPoll) * time.Second
+		case "i":
+			cfg.StoreInterval = time.Duration(*fStore) * time.Second
+		case "f":
+			cfg.FileStoragePath = *fFile
+		case "d":
+			cfg.DatabaseDSN = *fDSN
+		case "k":
+			cfg.Key = *fKey
+		case "l":
+			cfg.RateLimit = *fLimit
+		case "crypto-key":
+			cfg.CryptoKey = *fCrypto
+		case "r":
+			if isAgent {
+				cfg.ReportInterval = time.Duration(*fReport) * time.Second
+			} else {
+				cfg.Restore = *fRestore
+			}
+		}
 	})
 
-	reportFlagSet = flagSet["r"]
-	restoreFlagSet = flagSet["r"]
-
-	fileAddr := getStringFromConfig(fileConfig, "address")
-	fileReportStr := getStringFromConfig(fileConfig, "report_interval")
-	filePollStr := getStringFromConfig(fileConfig, "poll_interval")
-	fileStoreStr := getStringFromConfig(fileConfig, "store_interval")
-	fileStoreFile := getStringFromConfig(fileConfig, "store_file")
-	fileRestore := getBoolFromConfig(fileConfig, "restore")
-	fileDBDSN := getStringFromConfig(fileConfig, "database_dsn")
-	fileCryptoKey := getStringFromConfig(fileConfig, "crypto_key")
-
-	fileReport := parseIntervalFromConfig(fileReportStr)
-	filePoll := parseIntervalFromConfig(filePollStr)
-	fileStore := parseIntervalFromConfig(fileStoreStr)
-
-	serverAddr := chooseString(*serverAddrFlag, flagSet["a"], envAddr, envAddrSet, fileAddr, DefaultServerAddr)
-	reportInterval := chooseInt(reportVal, reportFlagSet, envReport, envReportSet, fileReport, DefaultReportInterval)
-	pollInterval := chooseInt(*pollFlag, flagSet["p"], envPoll, envPollSet, filePoll, DefaultPollInterval)
-	storeInterval := chooseInt(*storeFlag, flagSet["i"], envStore, envStoreSet, fileStore, DefaultStoreInterval)
-
-	fileStorage := chooseString(*fileFlag, flagSet["f"], envFile, envFileSet, fileStoreFile, DefaultFileStoragePath)
-	if fileStorage == DefaultFileStoragePath && fileStoreFile != "" && !flagSet["f"] && !envFileSet {
-		fileStorage = fileStoreFile
+	if err := cleanenv.ReadEnv(&cfg); err != nil {
+		return nil, err
 	}
 
-	restorePtr := (*bool)(nil)
-	if fileRestore {
-		restorePtr = &fileRestore
-	}
-	restore := chooseBool(restoreVal, restoreFlagSet, envRestore, envRestoreSet, restorePtr, DefaultRestore)
-
-	databaseDSN := chooseString(*dbDSNFlag, flagSet["d"], envDBDSN, envDBDSNSet, fileDBDSN, "")
-	key := chooseString(*keyFlag, flagSet["k"], envKey, envKeySet, "", "")
-	rateLimit := chooseInt(*rateLimitFlag, flagSet["l"], envRateLimit, envRateLimitSet, 0, DefaultRateLimit)
-	auditFile := chooseString(*auditFileFlag, flagSet["audit-file"], envAuditFile, envAuditFileSet, "", "")
-	auditURL := chooseString(*auditURLFlag, flagSet["audit-url"], envAuditURL, envAuditURLSet, "", "")
-	cryptoKey := chooseString(*cryptoKeyFlag, flagSet["crypto-key"], envCryptoKey, envCryptoKeySet, fileCryptoKey, "")
-
-	if reportInterval <= 0 {
-		return nil, errors.New("report interval must be greater than zero")
-	}
-	if pollInterval <= 0 {
-		return nil, errors.New("poll interval must be greater than zero")
+	if cfg.ReportInterval <= 0 || cfg.PollInterval <= 0 {
+		return nil, fmt.Errorf("intervals must be positive")
 	}
 
-	if isAgent && !strings.HasPrefix(serverAddr, "http://") && !strings.HasPrefix(serverAddr, "https://") {
-		serverAddr = "http://" + serverAddr
-	}
-	if !isAgent {
-		serverAddr = strings.TrimPrefix(serverAddr, "http://")
-		serverAddr = strings.TrimPrefix(serverAddr, "https://")
+	if isAgent {
+		if !strings.HasPrefix(cfg.ServerAddr, "http") {
+			cfg.ServerAddr = "http://" + cfg.ServerAddr
+		}
+	} else {
+		cfg.ServerAddr = strings.TrimPrefix(strings.TrimPrefix(cfg.ServerAddr, "https://"), "http://")
 	}
 
-	return &Config{
-		LogLevel:        *logLevel,
-		LogFormat:       *logFormat,
-		ServerAddr:      serverAddr,
-		ReportInterval:  time.Duration(reportInterval) * time.Second,
-		PollInterval:    time.Duration(pollInterval) * time.Second,
-		StoreInterval:   time.Duration(storeInterval) * time.Second,
-		FileStoragePath: fileStorage,
-		Restore:         restore,
-		DatabaseDSN:     databaseDSN,
-		Key:             key,
-		RateLimit:       rateLimit,
-		AuditFile:       auditFile,
-		AuditURL:        auditURL,
-		CryptoKey:       cryptoKey,
-	}, nil
+	return &cfg, nil
 }
 
-func getenvInt(key string, def int) (int, bool) {
-	if val := os.Getenv(key); val != "" {
-		if n, err := strconv.Atoi(val); err == nil && n > 0 {
-			return n, true
+func fixEnvDurations() {
+	envVars := []string{
+		"REPORT_INTERVAL", "POLL_INTERVAL", "STORE_INTERVAL",
+		"READ_TIMEOUT", "WRITE_TIMEOUT", "IDLE_TIMEOUT", "READ_HEADER_TIMEOUT",
+	}
+	isNumeric := regexp.MustCompile(`^\d+$`)
+	for _, v := range envVars {
+		val := os.Getenv(v)
+		if val != "" && isNumeric.MatchString(val) {
+			os.Setenv(v, val+"s")
 		}
 	}
-	return def, false
-}
-
-func getenvString(key string, def string) (string, bool) {
-	if val := os.Getenv(key); val != "" {
-		return val, true
-	}
-	return def, false
-}
-
-func getenvBool(key string, def bool) (bool, bool) {
-	if val := os.Getenv(key); val != "" {
-		v := strings.ToLower(val)
-		if v == "true" || v == "1" {
-			return true, true
-		}
-		if v == "false" || v == "0" {
-			return false, true
-		}
-	}
-	return def, false
 }
 
 func parseIntervalFromConfig(val string) int {

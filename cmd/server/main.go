@@ -97,8 +97,12 @@ func main() {
 
 	// Create HTTP server with proper shutdown configuration
 	server := &http.Server{
-		Addr:    cfg.ServerAddr,
-		Handler: loggedHandler,
+		Addr:              cfg.ServerAddr,
+		Handler:           loggedHandler,
+		ReadTimeout:       time.Duration(cfg.ReadTimeout) * time.Second,
+		WriteTimeout:      time.Duration(cfg.WriteTimeout) * time.Second,
+		IdleTimeout:       time.Duration(cfg.IdleTimeout) * time.Second,
+		ReadHeaderTimeout: time.Duration(cfg.ReadHeaderTimeout) * time.Second,
 	}
 
 	// Start pprof server in a separate goroutine
