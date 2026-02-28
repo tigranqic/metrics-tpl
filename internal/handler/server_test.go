@@ -24,7 +24,7 @@ func TestHandler_Router(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/update/gauge/Alloc/123.45", nil)
@@ -129,7 +129,7 @@ func TestHandler_JSONEndpoints(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	gaugeBody := `{"id":"Alloc","type":"gauge","value":123.45}`
@@ -208,7 +208,7 @@ func TestHandler_WithKey_InvalidHash(t *testing.T) {
 	db := setupTestDB(t)
 	logger, _ := zap.NewDevelopment()
 
-	h := NewHandler(store, db, logger, "secret", nil)
+	h := NewHandler(store, db, logger, "secret", nil, "")
 	router := h.Router()
 
 	body := `{"id":"Alloc","type":"gauge","value":123.45}`
@@ -231,7 +231,7 @@ func TestHandler_WithKey_ValidHash(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 
 	key := "secret"
-	h := NewHandler(store, db, logger, key, nil)
+	h := NewHandler(store, db, logger, key, nil, "")
 	router := h.Router()
 
 	body := []byte(`{"id":"Alloc","type":"gauge","value":123.45}`)
@@ -259,7 +259,7 @@ func TestHandler_WithKey_HealthNoHash(t *testing.T) {
 	db := setupTestDB(t)
 	logger, _ := zap.NewDevelopment()
 
-	h := NewHandler(store, db, logger, "secret", nil)
+	h := NewHandler(store, db, logger, "secret", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -280,7 +280,7 @@ func TestHandler_Ping(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "secret", nil)
+	h := NewHandler(store, db, logger, "secret", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
@@ -292,7 +292,7 @@ func TestHandler_Ping(t *testing.T) {
 	}
 
 	badDB, _ := sql.Open("postgres", "postgres://invalid:invalid@127.0.0.1:5432/bad_db?sslmode=disable")
-	h2 := NewHandler(store, badDB, logger, "", nil)
+	h2 := NewHandler(store, badDB, logger, "", nil, "")
 	router2 := h2.Router()
 	w2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodGet, "/ping", nil)
@@ -313,7 +313,7 @@ func TestHandler_UpdateMetricsBatch_Empty(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/updates/", strings.NewReader("[]"))
@@ -335,7 +335,7 @@ func TestHandler_UpdateMetricsBatch_InvalidJSON(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/updates/", strings.NewReader("{invalid-json}"))
@@ -357,7 +357,7 @@ func TestHandler_UpdateMetricJSON_InvalidType(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	body := `{"id":"Alloc","type":"unknown","value":123.45}`
@@ -380,7 +380,7 @@ func TestHandler_ConcurrentCounterUpdates(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	const goroutines = 10
@@ -415,7 +415,7 @@ func TestHandler_BatchUpdate_ValidMetrics(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	batch := `[{"id":"G1","type":"gauge","value":12.3},{"id":"C1","type":"counter","delta":7}]`
@@ -443,7 +443,7 @@ func TestHandler_Ping_ClosedDB(t *testing.T) {
 		t.Fatalf("failed to close test db: %v", err)
 	}
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
@@ -464,7 +464,7 @@ func TestHandler_Index_EmptyStore(t *testing.T) {
 		}
 	}()
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -477,6 +477,59 @@ func TestHandler_Index_EmptyStore(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "<html>") {
 		t.Fatalf("expected HTML content, got %s", w.Body.String())
 	}
+}
+
+func TestHandler_SubnetMiddleware(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	defer func() { _ = db.Close() }()
+	logger, _ := zap.NewDevelopment()
+
+	t.Run("allowed IP", func(t *testing.T) {
+		h := NewHandler(store, db, logger, "", nil, "192.168.1.0/24")
+		router := h.Router()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		req.Header.Set("X-Real-IP", "192.168.1.10")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", w.Code)
+		}
+	})
+
+	t.Run("forbidden IP", func(t *testing.T) {
+		h := NewHandler(store, db, logger, "", nil, "192.168.1.0/24")
+		router := h.Router()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		req.Header.Set("X-Real-IP", "10.0.0.1")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("expected 403, got %d", w.Code)
+		}
+	})
+
+	t.Run("missing header", func(t *testing.T) {
+		h := NewHandler(store, db, logger, "", nil, "192.168.1.0/24")
+		router := h.Router()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("expected 403, got %d", w.Code)
+		}
+	})
+
+	t.Run("empty subnet allows all", func(t *testing.T) {
+		h := NewHandler(store, db, logger, "", nil, "")
+		router := h.Router()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", w.Code)
+		}
+	})
 }
 
 func containsAll(s string, substrings ...string) bool {

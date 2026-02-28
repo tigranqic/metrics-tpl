@@ -82,7 +82,7 @@ func main() {
 	}
 
 	// Create HTTP handler with middleware
-	h := handler.NewHandler(store, db, log, cfg.Key, auditPublisher)
+	h := handler.NewHandler(store, db, log, cfg.Key, auditPublisher, cfg.TrustedSubnet)
 
 	// Load crypto key if provided
 	if cfg.CryptoKey != "" {

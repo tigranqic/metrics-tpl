@@ -7,6 +7,7 @@ package config
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"strconv"
@@ -42,6 +43,7 @@ type Config struct {
 	WriteTimeout      time.Duration `yaml:"write_timeout" env:"WRITE_TIMEOUT" env-default:"10s"`
 	IdleTimeout       time.Duration `yaml:"idle_timeout" env:"IDLE_TIMEOUT" env-default:"60s"`
 	ReadHeaderTimeout time.Duration `yaml:"read_header_timeout" env:"READ_HEADER_TIMEOUT" env-default:"5s"`
+	TrustedSubnet     string        `yaml:"trusted_subnet" env:"TRUSTED_SUBNET"`
 }
 
 func Load(isAgent bool) (*Config, error) {
@@ -78,6 +80,7 @@ func Load(isAgent bool) (*Config, error) {
 	fKey := fs.String("k", cfg.Key, "")
 	fLimit := fs.Int("l", cfg.RateLimit, "")
 	fCrypto := fs.String("crypto-key", cfg.CryptoKey, "")
+	fTrustedSubnet := fs.String("t", cfg.TrustedSubnet, "")
 
 	var fReport *int
 	var fRestore *bool
@@ -109,6 +112,8 @@ func Load(isAgent bool) (*Config, error) {
 			cfg.RateLimit = *fLimit
 		case "crypto-key":
 			cfg.CryptoKey = *fCrypto
+		case "t":
+			cfg.TrustedSubnet = *fTrustedSubnet
 		case "r":
 			if isAgent {
 				cfg.ReportInterval = time.Duration(*fReport) * time.Second
@@ -146,7 +151,10 @@ func fixEnvDurations() {
 	for _, v := range envVars {
 		val := os.Getenv(v)
 		if val != "" && isNumeric.MatchString(val) {
-			os.Setenv(v, val+"s")
+			err := os.Setenv(v, val+"s")
+			if err != nil {
+				log.Printf("failed to set env %s: %v", v, err)
+			}
 		}
 	}
 }

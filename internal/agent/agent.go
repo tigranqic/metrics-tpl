@@ -10,7 +10,9 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -339,9 +341,15 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
+
+	ip, _ := getOutboundIP()
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+	if ip != "" {
+		req.Header.Set("X-Real-IP", ip)
+	}
 	if hash != "" {
 		req.Header.Set("Hash", hash)
 	}
@@ -407,10 +415,15 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 		return fmt.Errorf("gzip close failed: %w", err)
 	}
 
+	ip, _ := getOutboundIP()
+
 	req, _ := retryablehttp.NewRequest(http.MethodPost, fullURL, &buf)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+	if ip != "" {
+		req.Header.Set("X-Real-IP", ip)
+	}
 	if hash != "" {
 		req.Header.Set("Hash", hash)
 	}
@@ -494,4 +507,18 @@ func waitForServer(baseURL string, timeout time.Duration, log *zap.Logger) error
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("server %s not responding within %s", baseURL, timeout)
+}
+
+func getOutboundIP() (string, error) {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			log.Printf("failed to close connection: %v", err)
+		}
+	}()
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String(), nil
 }
