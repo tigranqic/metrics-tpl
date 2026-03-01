@@ -2,8 +2,11 @@ package agent
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"io"
+	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,9 +14,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	models "github.com/tigranqic/metrics-tpl/internal/model"
+	"github.com/tigranqic/metrics-tpl/internal/proto"
 	"github.com/tigranqic/metrics-tpl/pkg/hashutil"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 func TestCollectMetrics(t *testing.T) {
@@ -274,7 +284,7 @@ func TestSendWorkerProcessesMetrics(t *testing.T) {
 	go a.sendWorker(stop)
 
 	metric := models.Metrics{ID: "TestMetric", MType: "gauge", Value: ptrFloat64(123)}
-	a.sendCh <- metric
+	a.sendCh <- []models.Metrics{metric}
 
 	time.Sleep(50 * time.Millisecond)
 	close(stop)
@@ -364,6 +374,64 @@ func TestSendWorkerClosedChannel(t *testing.T) {
 }
 
 func ptrFloat64(f float64) *float64 { return &f }
+
+type mockMetricsServer struct {
+	proto.UnimplementedMetricsServer
+	gotReq *proto.UpdateMetricsRequest
+	gotIP  string
+}
+
+func (m *mockMetricsServer) UpdateMetrics(ctx context.Context, req *proto.UpdateMetricsRequest) (*proto.UpdateMetricsResponse, error) {
+	m.gotReq = req
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		ips := md.Get("x-real-ip")
+		if len(ips) > 0 {
+			m.gotIP = ips[0]
+		}
+	}
+	return &proto.UpdateMetricsResponse{}, nil
+}
+
+func TestAgent_reportgRPC(t *testing.T) {
+	lis := bufconn.Listen(1024 * 1024)
+	s := grpc.NewServer()
+	mock := &mockMetricsServer{}
+	proto.RegisterMetricsServer(s, mock)
+	go func() {
+		if err := s.Serve(lis); err != nil && err != grpc.ErrServerStopped {
+			log.Printf("gRPC server error: %v", err)
+		}
+	}()
+	defer s.Stop()
+
+	conn, err := grpc.NewClient("passthrough://bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return lis.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	defer func() {
+		if err := conn.Close(); err != nil {
+			log.Printf("failed to close connection: %v", err)
+		}
+	}()
+	a := NewAgent("http://localhost:8080", 2, 10, "", 1)
+	a.grpcClient = proto.NewMetricsClient(conn)
+
+	gaugeVal := 123.45
+	metrics := []models.Metrics{
+		{ID: "Alloc", MType: "gauge", Value: &gaugeVal},
+	}
+
+	err = a.reportgRPC(metrics)
+	require.NoError(t, err)
+
+	assert.NotNil(t, mock.gotReq)
+	assert.Len(t, mock.gotReq.Metrics, 1)
+	assert.Equal(t, "Alloc", mock.gotReq.Metrics[0].Id)
+	assert.Equal(t, gaugeVal, mock.gotReq.Metrics[0].Value)
+	assert.NotEmpty(t, mock.gotIP)
+}
 
 func TestMain(m *testing.M) {
 	logger.Init("debug", "json")

@@ -24,10 +24,14 @@ import (
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
 	models "github.com/tigranqic/metrics-tpl/internal/model"
+	"github.com/tigranqic/metrics-tpl/internal/proto"
 	"github.com/tigranqic/metrics-tpl/pkg/cryptoutil"
 	"github.com/tigranqic/metrics-tpl/pkg/hashutil"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -43,6 +47,7 @@ const (
 // then reports them to a remote server at configured intervals.
 type Agent struct {
 	ServerURL      string
+	GRPCAddr       string
 	PollInterval   time.Duration
 	ReportInterval time.Duration
 	Key            string
@@ -52,11 +57,13 @@ type Agent struct {
 	pollCount             int64
 	lastReportedPollCount int64
 	client                *retryablehttp.Client
+	grpcClient            proto.MetricsClient
+	grpcConn              *grpc.ClientConn
 
 	metrics map[string]string
 	log     *zap.Logger
 
-	sendCh     chan models.Metrics
+	sendCh     chan []models.Metrics
 	mu         sync.Mutex
 	workerWg   sync.WaitGroup
 	shutdownCh chan struct{}
@@ -85,7 +92,7 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, key 
 		log:            logger.Get(),
 		Key:            key,
 		RateLimit:      rateLimit,
-		sendCh:         make(chan models.Metrics, rateLimit),
+		sendCh:         make(chan []models.Metrics, rateLimit),
 		shutdownCh:     make(chan struct{}),
 	}
 }
@@ -106,10 +113,25 @@ func (a *Agent) SetCryptoKey(keyPath string) error {
 	return nil
 }
 
+// SetGRPC configures the gRPC connection for the agent.
+func (a *Agent) SetGRPC(addr string) error {
+	if addr == "" {
+		return nil
+	}
+	a.GRPCAddr = addr
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("failed to connect to gRPC server: %w", err)
+	}
+	a.grpcConn = conn
+	a.grpcClient = proto.NewMetricsClient(conn)
+	return nil
+}
+
 // Run starts the main agent loop. It periodically collects metrics and sends them
 // to the server until a stop signal is received.
 func (a *Agent) Run(stop <-chan struct{}) {
-	a.log.Info("starting agent loop", zap.String("server", a.ServerURL))
+	a.log.Info("starting agent loop", zap.String("server", a.ServerURL), zap.String("grpc", a.GRPCAddr))
 
 	if err := waitForServer(a.ServerURL, 10*time.Second, a.log); err != nil {
 		a.log.Error("server not available", zap.String("url", a.ServerURL), zap.Error(err))
@@ -136,7 +158,7 @@ func (a *Agent) Run(stop <-chan struct{}) {
 			a.collectMetrics()
 
 		case <-reportTicker.C:
-			a.log.Debug("sending metrics")
+			a.log.Debug("sending metrics snapshot")
 			var snapshot []models.Metrics
 
 			a.mu.Lock()
@@ -158,42 +180,41 @@ func (a *Agent) Run(stop <-chan struct{}) {
 			a.lastReportedPollCount = a.pollCount
 			a.mu.Unlock()
 
-			for _, m := range snapshot {
-				a.sendCh <- m
-			}
+			// Send the whole batch to the workers
+			a.sendCh <- snapshot
 
 		case <-stop:
 			a.log.Info("agent stopped gracefully")
+			if a.grpcConn != nil {
+				_ = a.grpcConn.Close()
+			}
 			return
 		}
 	}
 }
 
-// sendWorker continuously reads metrics from the sendCh channel and sends them
-// to the server until a graceful shutdown is signaled.
-// During graceful shutdown, it drains the channel and sends all remaining metrics
-// before exiting.
+// sendWorker continuously reads metric batches from the sendCh channel and reports
+// them to the server until a graceful shutdown is signaled.
 func (a *Agent) sendWorker(stop <-chan struct{}) {
 	defer a.workerWg.Done()
 
 	for {
 		select {
-		case m := <-a.sendCh:
-			if err := a.sendSingle(m); err != nil {
-				a.log.Error("metric send failed", zap.Error(err))
+		case batch := <-a.sendCh:
+			if err := a.report(batch); err != nil {
+				a.log.Error("reporting failed", zap.Error(err))
 			}
 		case <-stop:
-			// Graceful shutdown: drain remaining metrics from channel
-			a.log.Debug("worker received stop signal, draining remaining metrics")
+			// Graceful shutdown: drain remaining batches from channel
+			a.log.Debug("worker received stop signal, draining remaining batches")
 			for {
 				select {
-				case m := <-a.sendCh:
-					if err := a.sendSingle(m); err != nil {
-						a.log.Error("metric send failed during shutdown", zap.Error(err))
+				case batch := <-a.sendCh:
+					if err := a.report(batch); err != nil {
+						a.log.Error("reporting failed during shutdown", zap.Error(err))
 					}
 				default:
-					// Channel is empty, exit the worker
-					a.log.Debug("worker finished draining metrics, exiting")
+					a.log.Debug("worker finished draining batches, exiting")
 					return
 				}
 			}
@@ -201,7 +222,48 @@ func (a *Agent) sendWorker(stop <-chan struct{}) {
 	}
 }
 
-// sendSingle sends a single metric to the server.
+// report determines the reporting protocol (gRPC or HTTP) and sends the metrics.
+func (a *Agent) report(batch []models.Metrics) error {
+	if a.grpcClient != nil {
+		// For gRPC, send as a single batch
+		return a.reportgRPC(batch)
+	}
+
+	// For HTTP, send as a batch (with individual fallback inside sendBatch)
+	return a.sendBatch(batch)
+}
+
+func (a *Agent) reportgRPC(metrics []models.Metrics) error {
+	var grpcMetrics []*proto.Metric
+	for _, m := range metrics {
+		gm := &proto.Metric{
+			Id: m.ID,
+		}
+		if m.MType == MetricTypeGauge {
+			gm.Type = proto.Metric_GAUGE
+			gm.Value = *m.Value
+		} else {
+			gm.Type = proto.Metric_COUNTER
+			gm.Delta = *m.Delta
+		}
+		grpcMetrics = append(grpcMetrics, gm)
+	}
+
+	ip, _ := getOutboundIP()
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "x-real-ip", ip)
+
+	_, err := a.grpcClient.UpdateMetrics(ctx, &proto.UpdateMetricsRequest{
+		Metrics: grpcMetrics,
+	})
+	if err != nil {
+		return fmt.Errorf("gRPC UpdateMetrics failed: %w", err)
+	}
+
+	a.log.Info("metrics reported via gRPC", zap.Int("count", len(metrics)))
+	return nil
+}
+
+// sendSingle sends a single metric to the server using HTTP.
 func (a *Agent) sendSingle(m models.Metrics) error {
 	if m.MType == MetricTypeGauge {
 		return a.sendMetric(MetricTypeGauge, m.ID, fmt.Sprintf("%f", *m.Value))
@@ -373,8 +435,7 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 	return nil
 }
 
-// sendBatch sends multiple metrics in a single request. If the batch endpoint is
-// unavailable or fails, it falls back to sending individual metrics.
+// sendBatch sends multiple metrics in a single HTTP request.
 func (a *Agent) sendBatch(metrics []models.Metrics) error {
 	if len(metrics) == 0 {
 		return nil
@@ -441,17 +502,13 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 		} else if err != nil {
 			a.log.Warn("batch send failed, falling back to individual metrics", zap.Error(err))
 		} else {
-			a.log.Warn("batch send failed with status", zap.Int("status", resp.StatusCode))
+			a.log.Warn("batch send failed with status, falling back to individual metrics", zap.Int("status", resp.StatusCode))
 		}
 		if resp != nil {
 			defer func() { _ = resp.Body.Close() }()
 		}
 		for _, m := range metrics {
-			if m.MType == MetricTypeGauge {
-				_ = a.sendMetric(MetricTypeGauge, m.ID, fmt.Sprintf("%f", *m.Value))
-			} else {
-				_ = a.sendMetric(MetricTypeCounter, m.ID, fmt.Sprintf("%d", *m.Delta))
-			}
+			_ = a.sendSingle(m)
 		}
 		return nil
 	}
@@ -463,7 +520,7 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 		return fmt.Errorf("server returned %s", resp.Status)
 	}
 
-	a.log.Info("batch sent", zap.Int("count", len(metrics)), zap.Int("status", resp.StatusCode), zap.Duration("duration", duration))
+	a.log.Info("batch sent via HTTP", zap.Int("count", len(metrics)), zap.Int("status", resp.StatusCode), zap.Duration("duration", duration))
 	return nil
 }
 

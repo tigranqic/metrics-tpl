@@ -1,12 +1,15 @@
 package repository
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
 	"github.com/tigranqic/metrics-tpl/internal/repository/pgerrors"
 )
@@ -63,4 +66,53 @@ func TestPostgresErrorClassifier_OtherErrors(t *testing.T) {
 
 	class = classifier.Classify(nil)
 	assert.Equal(t, pgerrors.NonRetriable, class)
+}
+
+type mockExecutor struct {
+	calls int
+	err   error
+}
+
+func (m *mockExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	m.calls++
+	return nil, m.err
+}
+
+func TestExecWithRetry(t *testing.T) {
+	log := zap.NewNop()
+	ctx := context.Background()
+
+	t.Run("Success first attempt", func(t *testing.T) {
+		m := &mockExecutor{}
+		err := ExecWithRetry(ctx, m, log, "SELECT 1")
+		assert.NoError(t, err)
+		assert.Equal(t, 1, m.calls)
+	})
+
+	t.Run("Non-retriable error", func(t *testing.T) {
+		m := &mockExecutor{err: errors.New("fatal")}
+		err := ExecWithRetry(ctx, m, log, "SELECT 1")
+		assert.Error(t, err)
+		assert.Equal(t, 1, m.calls)
+	})
+
+	t.Run("PQ Non-retriable error", func(t *testing.T) {
+		m := &mockExecutor{err: &pq.Error{Code: pgerrcode.UniqueViolation}}
+		err := ExecWithRetry(ctx, m, log, "SELECT 1")
+		assert.Error(t, err)
+		assert.Equal(t, 1, m.calls)
+	})
+
+	t.Run("Retriable exhaustion", func(t *testing.T) {
+		// Mock a retriable error
+		m := &mockExecutor{err: &pq.Error{Code: pgerrcode.ConnectionFailure}}
+
+		if testing.Short() {
+			t.Skip("skipping test in short mode")
+		}
+
+		err := ExecWithRetry(ctx, m, log, "SELECT 1")
+		assert.Error(t, err)
+		assert.Equal(t, 4, m.calls) // 1 initial + 3 retries
+	})
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,10 +19,12 @@ import (
 	"github.com/tigranqic/metrics-tpl/internal/config"
 	"github.com/tigranqic/metrics-tpl/internal/handler"
 	"github.com/tigranqic/metrics-tpl/internal/middleware"
+	"github.com/tigranqic/metrics-tpl/internal/proto"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
 	"github.com/tigranqic/metrics-tpl/pkg/cryptoutil"
 	"github.com/tigranqic/metrics-tpl/pkg/logger"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 var (
@@ -105,6 +108,12 @@ func main() {
 		ReadHeaderTimeout: time.Duration(cfg.ReadHeaderTimeout) * time.Second,
 	}
 
+	// Create gRPC server
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(handler.SubnetInterceptor(cfg.TrustedSubnet, log)),
+	)
+	proto.RegisterMetricsServer(grpcServer, handler.NewMetricsServer(store, log))
+
 	// Start pprof server in a separate goroutine
 	go func() {
 		log.Info("starting pprof server", zap.String("address", "localhost:6065"))
@@ -125,6 +134,18 @@ func main() {
 		}
 	}()
 
+	// Start gRPC server in a separate goroutine
+	go func() {
+		listen, err := net.Listen("tcp", cfg.GRPCAddr)
+		if err != nil {
+			log.Fatal("failed to listen for gRPC", zap.Error(err))
+		}
+		log.Info("starting gRPC server", zap.String("address", cfg.GRPCAddr))
+		if err := grpcServer.Serve(listen); err != nil {
+			log.Error("gRPC server failed", zap.Error(err))
+		}
+	}()
+
 	// Wait for termination signal
 	<-ctx.Done()
 	log.Info("received termination signal, starting graceful shutdown")
@@ -137,6 +158,9 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Error("server shutdown error", zap.Error(err))
 	}
+
+	// Gracefully stop the gRPC server
+	grpcServer.GracefulStop()
 
 	// Ensure all unsaved data is persisted
 	if err := store.Shutdown(); err != nil {

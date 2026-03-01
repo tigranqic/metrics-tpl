@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	_ "github.com/lib/pq"
+	"github.com/stretchr/testify/assert"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
 	"github.com/tigranqic/metrics-tpl/pkg/hashutil"
 	"go.uber.org/zap"
@@ -18,11 +19,11 @@ import (
 func TestHandler_Router(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close test DB: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
@@ -123,11 +124,11 @@ func TestHandler_Router(t *testing.T) {
 func TestHandler_JSONEndpoints(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close test DB: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
@@ -203,9 +204,67 @@ func TestHandler_JSONEndpoints(t *testing.T) {
 	}
 }
 
+func TestHandler_JSONEndpoints_Errors(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger, "", nil, "")
+	router := h.Router()
+
+	t.Run("update invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/update/", strings.NewReader(`{invalid`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("update missing ID", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/update/", strings.NewReader(`{"type":"gauge","value":1.0}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("update missing value", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/update/", strings.NewReader(`{"id":"m1","type":"gauge"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("value missing ID", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/value/", strings.NewReader(`{"type":"gauge"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("batch invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/updates/", strings.NewReader(`[{`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
 func TestHandler_WithKey_InvalidHash(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 
 	h := NewHandler(store, db, logger, "secret", nil, "")
@@ -228,6 +287,11 @@ func TestHandler_WithKey_InvalidHash(t *testing.T) {
 func TestHandler_WithKey_ValidHash(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 
 	key := "secret"
@@ -257,6 +321,11 @@ func TestHandler_WithKey_ValidHash(t *testing.T) {
 func TestHandler_WithKey_HealthNoHash(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 
 	h := NewHandler(store, db, logger, "secret", nil, "")
@@ -274,11 +343,13 @@ func TestHandler_WithKey_HealthNoHash(t *testing.T) {
 func TestHandler_Ping(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
+	if db == nil {
+		t.Skip("Skipping TestHandler_Ping: DATABASE_DSN not set")
+	}
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
+		_ = db.Close()
 	}()
+
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "secret", nil, "")
 	router := h.Router()
@@ -307,11 +378,11 @@ func TestHandler_Ping(t *testing.T) {
 func TestHandler_UpdateMetricsBatch_Empty(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
@@ -329,11 +400,11 @@ func TestHandler_UpdateMetricsBatch_Empty(t *testing.T) {
 func TestHandler_UpdateMetricsBatch_InvalidJSON(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
@@ -351,11 +422,11 @@ func TestHandler_UpdateMetricsBatch_InvalidJSON(t *testing.T) {
 func TestHandler_UpdateMetricJSON_InvalidType(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
@@ -374,11 +445,11 @@ func TestHandler_UpdateMetricJSON_InvalidType(t *testing.T) {
 func TestHandler_ConcurrentCounterUpdates(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
@@ -409,11 +480,11 @@ func TestHandler_ConcurrentCounterUpdates(t *testing.T) {
 func TestHandler_BatchUpdate_ValidMetrics(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
@@ -439,6 +510,9 @@ func TestHandler_BatchUpdate_ValidMetrics(t *testing.T) {
 func TestHandler_Ping_ClosedDB(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
+	if db == nil {
+		t.Skip("Skipping TestHandler_Ping_ClosedDB: DATABASE_DSN not set")
+	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("failed to close test db: %v", err)
 	}
@@ -458,11 +532,11 @@ func TestHandler_Ping_ClosedDB(t *testing.T) {
 func TestHandler_Index_EmptyStore(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
@@ -482,7 +556,11 @@ func TestHandler_Index_EmptyStore(t *testing.T) {
 func TestHandler_SubnetMiddleware(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() { _ = db.Close() }()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 
 	t.Run("allowed IP", func(t *testing.T) {
@@ -544,7 +622,7 @@ func containsAll(s string, substrings ...string) bool {
 func setupTestDB(t *testing.T) *sql.DB {
 	dsn := os.Getenv("DATABASE_DSN")
 	if dsn == "" {
-		t.Fatal("DATABASE_DSN is not set")
+		return nil
 	}
 
 	db, err := sql.Open("postgres", dsn)

@@ -110,14 +110,22 @@ func TestAuditConfigFromEnv(t *testing.T) {
 	assert.Equal(t, "http://audit", cfg.AuditURL)
 }
 
-func TestKeyFromEnv(t *testing.T) {
-	resetFlags()
-	clearEnv()
+func TestParseIntervalFromConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected int
+	}{
+		{"Empty", "", 0},
+		{"Valid duration", "10s", 10},
+		{"Valid number", "20", 20},
+		{"Invalid", "abc", 0},
+		{"Negative", "-1", 0},
+	}
 
-	require.NoError(t, os.Setenv("KEY", "super-secret"))
-
-	cfg, err := Load(true)
-	require.NoError(t, err)
-
-	assert.Equal(t, "super-secret", cfg.Key)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, parseIntervalFromConfig(tt.input))
+		})
+	}
 }

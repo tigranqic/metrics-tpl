@@ -44,6 +44,7 @@ type Config struct {
 	IdleTimeout       time.Duration `yaml:"idle_timeout" env:"IDLE_TIMEOUT" env-default:"60s"`
 	ReadHeaderTimeout time.Duration `yaml:"read_header_timeout" env:"READ_HEADER_TIMEOUT" env-default:"5s"`
 	TrustedSubnet     string        `yaml:"trusted_subnet" env:"TRUSTED_SUBNET"`
+	GRPCAddr          string        `yaml:"grpc_address" env:"GRPC_ADDRESS"`
 }
 
 func Load(isAgent bool) (*Config, error) {
@@ -81,6 +82,9 @@ func Load(isAgent bool) (*Config, error) {
 	fLimit := fs.Int("l", cfg.RateLimit, "")
 	fCrypto := fs.String("crypto-key", cfg.CryptoKey, "")
 	fTrustedSubnet := fs.String("t", cfg.TrustedSubnet, "")
+	fGRPC := fs.String("g", cfg.GRPCAddr, "")
+	fAuditFile := fs.String("audit-file", cfg.AuditFile, "")
+	fAuditURL := fs.String("audit-url", cfg.AuditURL, "")
 
 	var fReport *int
 	var fRestore *bool
@@ -114,6 +118,12 @@ func Load(isAgent bool) (*Config, error) {
 			cfg.CryptoKey = *fCrypto
 		case "t":
 			cfg.TrustedSubnet = *fTrustedSubnet
+		case "g":
+			cfg.GRPCAddr = *fGRPC
+		case "audit-file":
+			cfg.AuditFile = *fAuditFile
+		case "audit-url":
+			cfg.AuditURL = *fAuditURL
 		case "r":
 			if isAgent {
 				cfg.ReportInterval = time.Duration(*fReport) * time.Second

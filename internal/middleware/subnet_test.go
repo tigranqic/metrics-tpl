@@ -51,6 +51,12 @@ func TestSubnetMiddleware(t *testing.T) {
 			xRealIP:       "not-an-ip",
 			expectedCode:  http.StatusForbidden,
 		},
+		{
+			name:          "Invalid trusted subnet CIDR",
+			trustedSubnet: "invalid-cidr",
+			xRealIP:       "192.168.1.1",
+			expectedCode:  http.StatusOK,
+		},
 	}
 
 	for _, tt := range tests {

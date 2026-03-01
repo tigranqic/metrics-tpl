@@ -101,10 +101,13 @@ help:
 	@echo "  make cover            - Run coverage tests with covertest"
 
 run-server:
-	$(SERVER_BIN) -a=localhost:8080 --audit-file=audit
+	$(SERVER_BIN) -a=localhost:8080 --audit-file=audit -g=:3200
 
 run-agent:
-	$(AGENT_BIN) -a=http://localhost:8080 -r=10 -p=2
+	$(AGENT_BIN) -a=http://localhost:8080 -r=10 -p=2 -g=localhost:3200
+
+generate-proto:
+	protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative internal/proto/metrics.proto
 
 run-server-crypto:
 	$(SERVER_BIN) -a=localhost:8080 --audit-file=audit -crypto-key=./test_private.pem
