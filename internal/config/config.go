@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
@@ -147,6 +148,14 @@ func Load(isAgent bool) (*Config, error) {
 		}
 	} else {
 		cfg.ServerAddr = strings.TrimPrefix(strings.TrimPrefix(cfg.ServerAddr, "https://"), "http://")
+	}
+
+	// Validate TrustedSubnet CIDR
+	if cfg.TrustedSubnet != "" {
+		_, _, err := net.ParseCIDR(cfg.TrustedSubnet)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted_subnet CIDR: %w", err)
+		}
 	}
 
 	return &cfg, nil

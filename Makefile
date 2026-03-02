@@ -140,31 +140,38 @@ cover:
 
 check-fmt:
 	@echo "Checking code formatting with gofmt..."
-	@if [ -n "$$(gofmt -l .)" ]; then \
-		echo "The following files are not properly formatted:"; \
-		gofmt -l .; \
-		exit 1; \
-	else \
-		echo "All files are properly formatted."; \
-	fi
+	@FILES=$$(find . -name "*.go" -not -path "./vendor/*" -not -name "*.pb.go" -not -name "*_grpc.pb.go" -not -name "*.gen.go"); \
+	if [ -n "$$FILES" ]; then \
+		BAD_FILES=$$(gofmt -l $$FILES); \
+		if [ -n "$$BAD_FILES" ]; then \
+			echo "The following files are not properly formatted:"; \
+			echo "$$BAD_FILES"; \
+			exit 1; \
+		fi; \
+	fi; \
+	echo "All relevant files are properly formatted."
 
 check-imports:
 	@echo "Checking imports with goimports..."
-	@if [ -n "$$(goimports -l .)" ]; then \
-		echo "The following files have import issues:"; \
-		goimports -l .; \
-		exit 1; \
-	else \
-		echo "All imports are correct."; \
-	fi
+	@FILES=$$(find . -name "*.go" -not -path "./vendor/*" -not -name "*.pb.go" -not -name "*_grpc.pb.go" -not -name "*.gen.go"); \
+	if [ -n "$$FILES" ]; then \
+		BAD_FILES=$$(goimports -l $$FILES); \
+		if [ -n "$$BAD_FILES" ]; then \
+			echo "The following files have import issues:"; \
+			echo "$$BAD_FILES"; \
+			exit 1; \
+		fi; \
+	fi; \
+	echo "All relevant imports are correct."
 
 check: check-fmt check-imports
 	@echo "Code formatting and imports are OK ✅"
 
 fmt-all:
-	gofmt -w .
-	goimports -w .
-	@echo "Code and imports formatted ✅"
+	@echo "Formatting code and imports (excluding vendor and generated files)..."
+	@find . -name "*.go" -not -path "./vendor/*" -not -name "*.pb.go" -not -name "*_grpc.pb.go" -not -name "*.gen.go" -exec gofmt -w {} +
+	@find . -name "*.go" -not -path "./vendor/*" -not -name "*.pb.go" -not -name "*_grpc.pb.go" -not -name "*.gen.go" -exec goimports -w {} +
+	@echo "Done ✅"
 
 godoc:
 	@TMP_DIR=$$(mktemp -d /tmp/godoc-XXXXXX); \

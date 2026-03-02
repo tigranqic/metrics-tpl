@@ -10,7 +10,6 @@ import (
 func TestInit(t *testing.T) {
 	Init("debug", "text")
 	assert.NotNil(t, Get())
-	
 	Init("info", "json")
 	assert.NotNil(t, Get())
 }

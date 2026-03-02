@@ -129,3 +129,38 @@ func TestParseIntervalFromConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestTrustedSubnetValidation(t *testing.T) {
+	t.Run("Valid CIDR", func(t *testing.T) {
+		resetFlags()
+		clearEnv()
+		require.NoError(t, os.Setenv("TRUSTED_SUBNET", "192.168.1.0/24"))
+		defer func() { _ = os.Unsetenv("TRUSTED_SUBNET") }()
+
+		cfg, err := Load(false)
+		assert.NoError(t, err)
+		assert.Equal(t, "192.168.1.0/24", cfg.TrustedSubnet)
+	})
+
+	t.Run("Invalid CIDR", func(t *testing.T) {
+		resetFlags()
+		clearEnv()
+		require.NoError(t, os.Setenv("TRUSTED_SUBNET", "invalid-cidr"))
+		defer func() { _ = os.Unsetenv("TRUSTED_SUBNET") }()
+
+		_, err := Load(false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid trusted_subnet CIDR")
+	})
+
+	t.Run("Empty CIDR", func(t *testing.T) {
+		resetFlags()
+		clearEnv()
+		require.NoError(t, os.Setenv("TRUSTED_SUBNET", ""))
+		defer func() { _ = os.Unsetenv("TRUSTED_SUBNET") }()
+
+		cfg, err := Load(false)
+		assert.NoError(t, err)
+		assert.Equal(t, "", cfg.TrustedSubnet)
+	})
+}

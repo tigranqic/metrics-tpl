@@ -47,7 +47,7 @@ const (
 // then reports them to a remote server at configured intervals.
 type Agent struct {
 	ServerURL      string
-	GRPCAddr       string
+	grpcAddr       string
 	PollInterval   time.Duration
 	ReportInterval time.Duration
 	Key            string
@@ -59,6 +59,7 @@ type Agent struct {
 	client                *retryablehttp.Client
 	grpcClient            proto.MetricsClient
 	grpcConn              *grpc.ClientConn
+	localIP               string
 
 	metrics map[string]string
 	log     *zap.Logger
@@ -83,6 +84,8 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, key 
 		rateLimit = 1
 	}
 
+	ip, _ := getOutboundIP()
+
 	return &Agent{
 		ServerURL:      serverURL,
 		PollInterval:   pollInterval,
@@ -94,6 +97,7 @@ func NewAgent(serverURL string, pollInterval, reportInterval time.Duration, key 
 		RateLimit:      rateLimit,
 		sendCh:         make(chan []models.Metrics, rateLimit),
 		shutdownCh:     make(chan struct{}),
+		localIP:        ip,
 	}
 }
 
@@ -118,7 +122,7 @@ func (a *Agent) SetGRPC(addr string) error {
 	if addr == "" {
 		return nil
 	}
-	a.GRPCAddr = addr
+	a.grpcAddr = addr
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return fmt.Errorf("failed to connect to gRPC server: %w", err)
@@ -131,7 +135,7 @@ func (a *Agent) SetGRPC(addr string) error {
 // Run starts the main agent loop. It periodically collects metrics and sends them
 // to the server until a stop signal is received.
 func (a *Agent) Run(stop <-chan struct{}) {
-	a.log.Info("starting agent loop", zap.String("server", a.ServerURL), zap.String("grpc", a.GRPCAddr))
+	a.log.Info("starting agent loop", zap.String("server", a.ServerURL), zap.String("grpc", a.grpcAddr))
 
 	if err := waitForServer(a.ServerURL, 10*time.Second, a.log); err != nil {
 		a.log.Error("server not available", zap.String("url", a.ServerURL), zap.Error(err))
@@ -184,13 +188,18 @@ func (a *Agent) Run(stop <-chan struct{}) {
 			a.sendCh <- snapshot
 
 		case <-stop:
-			a.log.Info("agent stopped gracefully")
-			if a.grpcConn != nil {
-				_ = a.grpcConn.Close()
-			}
+			a.log.Info("agent polling loop stopped")
 			return
 		}
 	}
+}
+
+func (a *Agent) Shutdown() error {
+	if a.grpcConn != nil {
+		a.log.Info("closing gRPC connection")
+		return a.grpcConn.Close()
+	}
+	return nil
 }
 
 // sendWorker continuously reads metric batches from the sendCh channel and reports
@@ -249,8 +258,10 @@ func (a *Agent) reportgRPC(metrics []models.Metrics) error {
 		grpcMetrics = append(grpcMetrics, gm)
 	}
 
-	ip, _ := getOutboundIP()
-	ctx := metadata.AppendToOutgoingContext(context.Background(), "x-real-ip", ip)
+	ctx := context.Background()
+	if a.localIP != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-real-ip", a.localIP)
+	}
 
 	_, err := a.grpcClient.UpdateMetrics(ctx, &proto.UpdateMetricsRequest{
 		Metrics: grpcMetrics,
@@ -404,13 +415,11 @@ func (a *Agent) sendMetric(metricType, name, value string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	ip, _ := getOutboundIP()
-
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
-	if ip != "" {
-		req.Header.Set("X-Real-IP", ip)
+	if a.localIP != "" {
+		req.Header.Set("X-Real-IP", a.localIP)
 	}
 	if hash != "" {
 		req.Header.Set("Hash", hash)
@@ -476,14 +485,12 @@ func (a *Agent) sendBatch(metrics []models.Metrics) error {
 		return fmt.Errorf("gzip close failed: %w", err)
 	}
 
-	ip, _ := getOutboundIP()
-
 	req, _ := retryablehttp.NewRequest(http.MethodPost, fullURL, &buf)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
-	if ip != "" {
-		req.Header.Set("X-Real-IP", ip)
+	if a.localIP != "" {
+		req.Header.Set("X-Real-IP", a.localIP)
 	}
 	if hash != "" {
 		req.Header.Set("Hash", hash)

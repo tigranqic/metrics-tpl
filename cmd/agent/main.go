@@ -93,5 +93,9 @@ func main() {
 	// Wait for all workers to finish or timeout
 	a.WaitForShutdown(shutdownCtx)
 
+	if err := a.Shutdown(); err != nil {
+		log.Error("failed to shutdown agent", zap.Error(err))
+	}
+
 	log.Info("agent stopped gracefully")
 }
