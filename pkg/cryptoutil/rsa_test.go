@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // TestEncryptDecrypt tests the RSA encryption and decryption functionalities
@@ -227,6 +229,7 @@ func TestLoadPrivateKeyPKCS8(t *testing.T) {
 		t.Fatalf("failed to load pkcs8 private key: %v", err)
 	}
 }
+
 func TestLoadInvalidPEM(t *testing.T) {
 	dir := t.TempDir()
 
@@ -236,7 +239,56 @@ func TestLoadInvalidPEM(t *testing.T) {
 	}
 
 	_, err := LoadPublicKey(path)
-	if err == nil {
-		t.Error("loading invalid PEM should fail")
-	}
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse PEM block")
+}
+
+func TestLoadPrivateKey_Errors(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("Missing file", func(t *testing.T) {
+		_, err := LoadPrivateKey(filepath.Join(dir, "missing"))
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid block type", func(t *testing.T) {
+		path := filepath.Join(dir, "badtype.pem")
+		err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("abc")}), 0600)
+		assert.NoError(t, err)
+		_, err = LoadPrivateKey(path)
+		assert.Error(t, err)
+	})
+
+	t.Run("Malformed key bytes", func(t *testing.T) {
+		path := filepath.Join(dir, "malformed.pem")
+		err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("not-key")}), 0600)
+		assert.NoError(t, err)
+		_, err = LoadPrivateKey(path)
+		assert.Error(t, err)
+	})
+}
+
+func TestLoadPublicKey_Errors(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("Missing file", func(t *testing.T) {
+		_, err := LoadPublicKey(filepath.Join(dir, "missing"))
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid block type", func(t *testing.T) {
+		path := filepath.Join(dir, "badtype.pem")
+		err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("abc")}), 0600)
+		assert.NoError(t, err)
+		_, err = LoadPublicKey(path)
+		assert.Error(t, err)
+	})
+
+	t.Run("Malformed key bytes", func(t *testing.T) {
+		path := filepath.Join(dir, "malformed.pem")
+		err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte("not-key")}), 0600)
+		assert.NoError(t, err)
+		_, err = LoadPublicKey(path)
+		assert.Error(t, err)
+	})
 }

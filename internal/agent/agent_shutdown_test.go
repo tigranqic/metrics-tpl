@@ -32,9 +32,7 @@ func TestGracefulShutdown(t *testing.T) {
 		m2 := models.Metrics{ID: "test2", MType: "gauge", Value: func() *float64 { v := 2.0; return &v }()}
 		m3 := models.Metrics{ID: "test3", MType: "gauge", Value: func() *float64 { v := 3.0; return &v }()}
 
-		agent.sendCh <- m1
-		agent.sendCh <- m2
-		agent.sendCh <- m3
+		agent.sendCh <- []models.Metrics{m1, m2, m3}
 
 		time.Sleep(100 * time.Millisecond)
 
@@ -94,7 +92,7 @@ func TestGracefulShutdown(t *testing.T) {
 				MType: "gauge",
 				Value: func(v float64) *float64 { return &v }(float64(i)),
 			}
-			agent.sendCh <- m
+			agent.sendCh <- []models.Metrics{m}
 		}
 
 		// Give workers time to process some metrics
@@ -132,14 +130,14 @@ func TestAgentWorkerDrain(t *testing.T) {
 
 	// Add some metrics
 	m1 := models.Metrics{ID: "test1", MType: "gauge", Value: func() *float64 { v := 1.0; return &v }()}
-	agent.sendCh <- m1
+	agent.sendCh <- []models.Metrics{m1}
 
 	// Give worker time to process
 	time.Sleep(50 * time.Millisecond)
 
 	// Add more metrics and close stop channel
 	m2 := models.Metrics{ID: "test2", MType: "gauge", Value: func() *float64 { v := 2.0; return &v }()}
-	agent.sendCh <- m2
+	agent.sendCh <- []models.Metrics{m2}
 
 	close(stop)
 

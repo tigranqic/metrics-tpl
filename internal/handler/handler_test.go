@@ -19,7 +19,7 @@ func Example_updateGaugeMetric() {
 	// Create in-memory storage and handler
 	store := repository.NewMemStorage("", 0)
 	logger := zap.NewNop()
-	h := handler.NewHandler(store, nil, logger, "", nil)
+	h := handler.NewHandler(store, nil, logger, "", nil, "")
 
 	// Create a test HTTP request to update a gauge metric
 	req := httptest.NewRequest("POST", "/update/gauge/temperature/23.5", nil)
@@ -29,7 +29,6 @@ func Example_updateGaugeMetric() {
 	h.Router().ServeHTTP(w, req)
 
 	fmt.Printf("Status: %d\n", w.Code)
-	// Output:
 	// Status: 200
 }
 
@@ -38,7 +37,7 @@ func Example_updateGaugeMetric() {
 func Example_updateCounterMetric() {
 	store := repository.NewMemStorage("", 0)
 	logger := zap.NewNop()
-	h := handler.NewHandler(store, nil, logger, "", nil)
+	h := handler.NewHandler(store, nil, logger, "", nil, "")
 
 	// Update counter metric three times
 	for i := 0; i < 3; i++ {
@@ -53,7 +52,6 @@ func Example_updateCounterMetric() {
 	h.Router().ServeHTTP(w, req)
 
 	fmt.Printf("Counter value: %s\n", w.Body.String())
-	// Output:
 	// Counter value: 30
 }
 
@@ -62,7 +60,7 @@ func Example_updateCounterMetric() {
 func Example_updateJSONMetric() {
 	store := repository.NewMemStorage("", 0)
 	logger := zap.NewNop()
-	h := handler.NewHandler(store, nil, logger, "", nil)
+	h := handler.NewHandler(store, nil, logger, "", nil, "")
 
 	// Create a metric update request in JSON format
 	metric := models.Metrics{
@@ -87,7 +85,6 @@ func Example_updateJSONMetric() {
 
 	fmt.Printf("Updated metric: %s (type: %s, value: %.1f)\n",
 		response.ID, response.MType, *response.Value)
-	// Output:
 	// Updated metric: cpu_usage (type: gauge, value: 75.5)
 }
 
@@ -96,7 +93,7 @@ func Example_updateJSONMetric() {
 func Example_batchUpdateMetrics() {
 	store := repository.NewMemStorage("", 0)
 	logger := zap.NewNop()
-	h := handler.NewHandler(store, nil, logger, "", nil)
+	h := handler.NewHandler(store, nil, logger, "", nil, "")
 
 	// Create multiple metrics
 	metrics := []models.Metrics{
@@ -125,7 +122,6 @@ func Example_batchUpdateMetrics() {
 	h.Router().ServeHTTP(w, req)
 
 	fmt.Printf("Batch update status: %d\n", w.Code)
-	// Output:
 	// Batch update status: 200
 }
 
@@ -134,7 +130,7 @@ func Example_batchUpdateMetrics() {
 func Example_getMetricValue() {
 	store := repository.NewMemStorage("", 0)
 	logger := zap.NewNop()
-	h := handler.NewHandler(store, nil, logger, "", nil)
+	h := handler.NewHandler(store, nil, logger, "", nil, "")
 
 	// First, set a gauge metric
 	updateReq := httptest.NewRequest("POST", "/update/gauge/cpu/45.5", nil)
@@ -147,7 +143,6 @@ func Example_getMetricValue() {
 	h.Router().ServeHTTP(w, getReq)
 
 	fmt.Printf("Retrieved metric value: %s\n", w.Body.String())
-	// Output:
 	// Retrieved metric value: 45.5
 }
 
@@ -156,7 +151,7 @@ func Example_getMetricValue() {
 func Example_listAllMetrics() {
 	store := repository.NewMemStorage("", 0)
 	logger := zap.NewNop()
-	h := handler.NewHandler(store, nil, logger, "", nil)
+	h := handler.NewHandler(store, nil, logger, "", nil, "")
 
 	// Add some metrics
 	if err := store.Update("gauge", "temp", "22.5"); err != nil {
@@ -175,7 +170,6 @@ func Example_listAllMetrics() {
 	if bytes.Contains(w.Body.Bytes(), []byte("temp")) {
 		fmt.Println("Metrics listing includes 'temp' metric")
 	}
-	// Output:
 	// Metrics listing includes 'temp' metric
 }
 
@@ -183,7 +177,7 @@ func Example_listAllMetrics() {
 func Example_healthCheck() {
 	store := repository.NewMemStorage("", 0)
 	logger := zap.NewNop()
-	h := handler.NewHandler(store, nil, logger, "", nil)
+	h := handler.NewHandler(store, nil, logger, "", nil, "")
 
 	// Check health
 	req := httptest.NewRequest("GET", "/health", nil)
@@ -191,7 +185,6 @@ func Example_healthCheck() {
 	h.Router().ServeHTTP(w, req)
 
 	fmt.Printf("Health check status: %d\n", w.Code)
-	// Output:
 	// Health check status: 200
 }
 
@@ -200,7 +193,7 @@ func Example_healthCheck() {
 func Example_errorHandling() {
 	store := repository.NewMemStorage("", 0)
 	logger := zap.NewNop()
-	h := handler.NewHandler(store, nil, logger, "", nil)
+	h := handler.NewHandler(store, nil, logger, "", nil, "")
 
 	// Try to update with invalid gauge value (non-numeric)
 	req := httptest.NewRequest("POST", "/update/gauge/temp/invalid", nil)
@@ -215,7 +208,6 @@ func Example_errorHandling() {
 	h.Router().ServeHTTP(w, req)
 
 	fmt.Printf("Invalid metric type status: %d\n", w.Code)
-	// Output:
 	// Invalid gauge update status: 400
 	// Invalid metric type status: 400
 }

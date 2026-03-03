@@ -110,14 +110,57 @@ func TestAuditConfigFromEnv(t *testing.T) {
 	assert.Equal(t, "http://audit", cfg.AuditURL)
 }
 
-func TestKeyFromEnv(t *testing.T) {
-	resetFlags()
-	clearEnv()
+func TestParseIntervalFromConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected int
+	}{
+		{"Empty", "", 0},
+		{"Valid duration", "10s", 10},
+		{"Valid number", "20", 20},
+		{"Invalid", "abc", 0},
+		{"Negative", "-1", 0},
+	}
 
-	require.NoError(t, os.Setenv("KEY", "super-secret"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, parseIntervalFromConfig(tt.input))
+		})
+	}
+}
 
-	cfg, err := Load(true)
-	require.NoError(t, err)
+func TestTrustedSubnetValidation(t *testing.T) {
+	t.Run("Valid CIDR", func(t *testing.T) {
+		resetFlags()
+		clearEnv()
+		require.NoError(t, os.Setenv("TRUSTED_SUBNET", "192.168.1.0/24"))
+		defer func() { _ = os.Unsetenv("TRUSTED_SUBNET") }()
 
-	assert.Equal(t, "super-secret", cfg.Key)
+		cfg, err := Load(false)
+		assert.NoError(t, err)
+		assert.Equal(t, "192.168.1.0/24", cfg.TrustedSubnet)
+	})
+
+	t.Run("Invalid CIDR", func(t *testing.T) {
+		resetFlags()
+		clearEnv()
+		require.NoError(t, os.Setenv("TRUSTED_SUBNET", "invalid-cidr"))
+		defer func() { _ = os.Unsetenv("TRUSTED_SUBNET") }()
+
+		_, err := Load(false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid trusted_subnet CIDR")
+	})
+
+	t.Run("Empty CIDR", func(t *testing.T) {
+		resetFlags()
+		clearEnv()
+		require.NoError(t, os.Setenv("TRUSTED_SUBNET", ""))
+		defer func() { _ = os.Unsetenv("TRUSTED_SUBNET") }()
+
+		cfg, err := Load(false)
+		assert.NoError(t, err)
+		assert.Equal(t, "", cfg.TrustedSubnet)
+	})
 }

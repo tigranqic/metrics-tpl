@@ -48,6 +48,11 @@ func main() {
 	// Create a new agent instance
 	a := agent.NewAgent(cfg.ServerAddr, cfg.PollInterval, cfg.ReportInterval, cfg.Key, cfg.RateLimit)
 
+	// Set gRPC address if provided
+	if err := a.SetGRPC(cfg.GRPCAddr); err != nil {
+		log.Fatal("failed to set gRPC address", zap.Error(err))
+	}
+
 	// Load crypto key if provided
 	if cfg.CryptoKey != "" {
 		if err := a.SetCryptoKey(cfg.CryptoKey); err != nil {
@@ -87,6 +92,10 @@ func main() {
 
 	// Wait for all workers to finish or timeout
 	a.WaitForShutdown(shutdownCtx)
+
+	if err := a.Shutdown(); err != nil {
+		log.Error("failed to shutdown agent", zap.Error(err))
+	}
 
 	log.Info("agent stopped gracefully")
 }

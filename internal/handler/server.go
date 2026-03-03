@@ -35,12 +35,13 @@ import (
 //   - Notifying audit observers of metric updates
 //   - Applying middleware for compression and hash validation
 type Handler struct {
-	store      repository.Storage // Storage backend (memory or PostgreSQL)
-	db         *sql.DB            // Database connection
-	log        *zap.Logger        // Logger instance
-	key        string             // Secret key for hash authentication
-	Audit      *audit.Publisher   // Audit event publisher
-	PrivateKey *rsa.PrivateKey    // Private key for RSA decryption
+	store         repository.Storage // Storage backend (memory or PostgreSQL)
+	db            *sql.DB            // Database connection
+	log           *zap.Logger        // Logger instance
+	key           string             // Secret key for hash authentication
+	Audit         *audit.Publisher   // Audit event publisher
+	PrivateKey    *rsa.PrivateKey    // Private key for RSA decryption
+	TrustedSubnet string             // Trusted subnet (CIDR)
 }
 
 // RequestContext represents the context of an HTTP request,
@@ -60,6 +61,7 @@ type RequestContext struct {
 //   - log: Logger instance for error logging
 //   - key: Secret key used for request hash verification
 //   - auditPublisher: Publisher for audit events (can be nil to disable auditing)
+//   - trustedSubnet: Trusted subnet (CIDR) for IP filtering
 //
 // Returns a configured Handler ready to serve HTTP requests.
 func NewHandler(
@@ -68,13 +70,15 @@ func NewHandler(
 	log *zap.Logger,
 	key string,
 	auditPublisher *audit.Publisher,
+	trustedSubnet string,
 ) *Handler {
 	return &Handler{
-		store: store,
-		db:    db,
-		log:   log,
-		key:   key,
-		Audit: auditPublisher,
+		store:         store,
+		db:            db,
+		log:           log,
+		key:           key,
+		Audit:         auditPublisher,
+		TrustedSubnet: trustedSubnet,
 	}
 }
 
@@ -99,6 +103,7 @@ func (h *Handler) SetPrivateKey(privKey *rsa.PrivateKey) {
 //	POST /updates/     - Batch update metrics (JSON array body)
 //
 // Middleware applied:
+//   - SubnetMiddleware: Validates request X-Real-IP against trusted subnet
 //   - GzipDecompress: Decompresses gzip-encoded request bodies
 //   - DecryptionMiddleware: Decrypts RSA-encrypted request bodies if X-Encrypted header is present
 //   - HashMiddleware: Validates request signatures using HMAC-SHA256
@@ -108,6 +113,7 @@ func (h *Handler) SetPrivateKey(privKey *rsa.PrivateKey) {
 func (h *Handler) Router() http.Handler {
 	r := chi.NewRouter()
 
+	r.Use(middleware.SubnetMiddleware(h.TrustedSubnet, h.log))
 	r.Use(middleware.GzipDecompress)
 	r.Use(middleware.NewDecryptionMiddleware(h.PrivateKey, h.log))
 	r.Use(middleware.NewHashMiddleware(h.key, h.log).Handle)

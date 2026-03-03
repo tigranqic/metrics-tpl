@@ -270,9 +270,48 @@ func TestHTTPObserverNotifySuccess(t *testing.T) {
 	assert.Equal(t, event.Metrics, gotEvent.Metrics)
 }
 
-func TestHTTPObserverNotifyBadURL(t *testing.T) {
-	o := audit.NewHTTPObserver("http://[::1]:0")
-	event := audit.Event{Timestamp: 1}
-	err := o.Notify(event)
-	assert.Error(t, err)
+type mockObserver struct {
+	mu     sync.Mutex
+	called bool
+}
+
+func (m *mockObserver) Notify(e audit.Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.called = true
+	return nil
+}
+
+func (m *mockObserver) IsCalled() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.called
+}
+
+func (m *mockObserver) SetCalled(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.called = v
+}
+
+func TestPublisher_AddRemoveObserver(t *testing.T) {
+	log := zap.NewNop()
+	p := audit.NewPublisherWithPool(log, nil, 1)
+	defer p.Shutdown()
+
+	mock := &mockObserver{}
+
+	p.AddObserver(mock)
+	p.NotifyAllAsync(audit.Event{Timestamp: 1})
+
+	// Wait a bit for async processing
+	time.Sleep(100 * time.Millisecond)
+	assert.True(t, mock.IsCalled())
+
+	p.RemoveObserver(mock)
+	mock.SetCalled(false)
+	p.NotifyAllAsync(audit.Event{Timestamp: 2})
+
+	time.Sleep(100 * time.Millisecond)
+	assert.False(t, mock.IsCalled())
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	_ "github.com/lib/pq"
+	"github.com/stretchr/testify/assert"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
 	"github.com/tigranqic/metrics-tpl/pkg/hashutil"
 	"go.uber.org/zap"
@@ -18,13 +19,13 @@ import (
 func TestHandler_Router(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close test DB: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/update/gauge/Alloc/123.45", nil)
@@ -123,13 +124,13 @@ func TestHandler_Router(t *testing.T) {
 func TestHandler_JSONEndpoints(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close test DB: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	gaugeBody := `{"id":"Alloc","type":"gauge","value":123.45}`
@@ -203,12 +204,70 @@ func TestHandler_JSONEndpoints(t *testing.T) {
 	}
 }
 
+func TestHandler_JSONEndpoints_Errors(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
+	logger, _ := zap.NewDevelopment()
+	h := NewHandler(store, db, logger, "", nil, "")
+	router := h.Router()
+
+	t.Run("update invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/update/", strings.NewReader(`{invalid`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("update missing ID", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/update/", strings.NewReader(`{"type":"gauge","value":1.0}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("update missing value", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/update/", strings.NewReader(`{"id":"m1","type":"gauge"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("value missing ID", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/value/", strings.NewReader(`{"type":"gauge"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("batch invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/updates/", strings.NewReader(`[{`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
 func TestHandler_WithKey_InvalidHash(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 
-	h := NewHandler(store, db, logger, "secret", nil)
+	h := NewHandler(store, db, logger, "secret", nil, "")
 	router := h.Router()
 
 	body := `{"id":"Alloc","type":"gauge","value":123.45}`
@@ -228,10 +287,15 @@ func TestHandler_WithKey_InvalidHash(t *testing.T) {
 func TestHandler_WithKey_ValidHash(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 
 	key := "secret"
-	h := NewHandler(store, db, logger, key, nil)
+	h := NewHandler(store, db, logger, key, nil, "")
 	router := h.Router()
 
 	body := []byte(`{"id":"Alloc","type":"gauge","value":123.45}`)
@@ -257,9 +321,14 @@ func TestHandler_WithKey_ValidHash(t *testing.T) {
 func TestHandler_WithKey_HealthNoHash(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
 
-	h := NewHandler(store, db, logger, "secret", nil)
+	h := NewHandler(store, db, logger, "secret", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -274,13 +343,15 @@ func TestHandler_WithKey_HealthNoHash(t *testing.T) {
 func TestHandler_Ping(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
+	if db == nil {
+		t.Skip("Skipping TestHandler_Ping: DATABASE_DSN not set")
+	}
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
+		_ = db.Close()
 	}()
+
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "secret", nil)
+	h := NewHandler(store, db, logger, "secret", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
@@ -292,7 +363,7 @@ func TestHandler_Ping(t *testing.T) {
 	}
 
 	badDB, _ := sql.Open("postgres", "postgres://invalid:invalid@127.0.0.1:5432/bad_db?sslmode=disable")
-	h2 := NewHandler(store, badDB, logger, "", nil)
+	h2 := NewHandler(store, badDB, logger, "", nil, "")
 	router2 := h2.Router()
 	w2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodGet, "/ping", nil)
@@ -307,13 +378,13 @@ func TestHandler_Ping(t *testing.T) {
 func TestHandler_UpdateMetricsBatch_Empty(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/updates/", strings.NewReader("[]"))
@@ -329,13 +400,13 @@ func TestHandler_UpdateMetricsBatch_Empty(t *testing.T) {
 func TestHandler_UpdateMetricsBatch_InvalidJSON(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/updates/", strings.NewReader("{invalid-json}"))
@@ -351,13 +422,13 @@ func TestHandler_UpdateMetricsBatch_InvalidJSON(t *testing.T) {
 func TestHandler_UpdateMetricJSON_InvalidType(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	body := `{"id":"Alloc","type":"unknown","value":123.45}`
@@ -374,13 +445,13 @@ func TestHandler_UpdateMetricJSON_InvalidType(t *testing.T) {
 func TestHandler_ConcurrentCounterUpdates(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	const goroutines = 10
@@ -409,13 +480,13 @@ func TestHandler_ConcurrentCounterUpdates(t *testing.T) {
 func TestHandler_BatchUpdate_ValidMetrics(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	batch := `[{"id":"G1","type":"gauge","value":12.3},{"id":"C1","type":"counter","delta":7}]`
@@ -439,11 +510,14 @@ func TestHandler_BatchUpdate_ValidMetrics(t *testing.T) {
 func TestHandler_Ping_ClosedDB(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
+	if db == nil {
+		t.Skip("Skipping TestHandler_Ping_ClosedDB: DATABASE_DSN not set")
+	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("failed to close test db: %v", err)
 	}
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
@@ -458,13 +532,13 @@ func TestHandler_Ping_ClosedDB(t *testing.T) {
 func TestHandler_Index_EmptyStore(t *testing.T) {
 	store := repository.NewMemStorage("", 0)
 	db := setupTestDB(t)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("failed to close db: %v", err)
-		}
-	}()
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
 	logger, _ := zap.NewDevelopment()
-	h := NewHandler(store, db, logger, "", nil)
+	h := NewHandler(store, db, logger, "", nil, "")
 	router := h.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -479,6 +553,63 @@ func TestHandler_Index_EmptyStore(t *testing.T) {
 	}
 }
 
+func TestHandler_SubnetMiddleware(t *testing.T) {
+	store := repository.NewMemStorage("", 0)
+	db := setupTestDB(t)
+	if db != nil {
+		defer func() {
+			_ = db.Close()
+		}()
+	}
+	logger, _ := zap.NewDevelopment()
+
+	t.Run("allowed IP", func(t *testing.T) {
+		h := NewHandler(store, db, logger, "", nil, "192.168.1.0/24")
+		router := h.Router()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		req.Header.Set("X-Real-IP", "192.168.1.10")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", w.Code)
+		}
+	})
+
+	t.Run("forbidden IP", func(t *testing.T) {
+		h := NewHandler(store, db, logger, "", nil, "192.168.1.0/24")
+		router := h.Router()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		req.Header.Set("X-Real-IP", "10.0.0.1")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("expected 403, got %d", w.Code)
+		}
+	})
+
+	t.Run("missing header", func(t *testing.T) {
+		h := NewHandler(store, db, logger, "", nil, "192.168.1.0/24")
+		router := h.Router()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("expected 403, got %d", w.Code)
+		}
+	})
+
+	t.Run("empty subnet allows all", func(t *testing.T) {
+		h := NewHandler(store, db, logger, "", nil, "")
+		router := h.Router()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", w.Code)
+		}
+	})
+}
+
 func containsAll(s string, substrings ...string) bool {
 	for _, sub := range substrings {
 		if !strings.Contains(s, sub) {
@@ -491,7 +622,7 @@ func containsAll(s string, substrings ...string) bool {
 func setupTestDB(t *testing.T) *sql.DB {
 	dsn := os.Getenv("DATABASE_DSN")
 	if dsn == "" {
-		t.Fatal("DATABASE_DSN is not set")
+		return nil
 	}
 
 	db, err := sql.Open("postgres", dsn)

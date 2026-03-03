@@ -139,6 +139,31 @@ func TestHashMiddleware_ReadBodyError(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "failed to read body")
 }
 
+func TestHashMiddleware_OtherMethods(t *testing.T) {
+	logger := zap.NewNop()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	m := NewHashMiddleware("secret", logger)
+
+	t.Run("PUT", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPut, "/test", strings.NewReader("data"))
+		hash := hashutil.CalcSHA256([]byte("data"), "secret")
+		req.Header.Set("Hash", hash)
+		rec := httptest.NewRecorder()
+		m.Handle(handler).ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("DELETE", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodDelete, "/test", nil)
+		rec := httptest.NewRecorder()
+		m.Handle(handler).ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+}
+
 type errorReader struct{}
 
 func (e errorReader) Read(p []byte) (int, error) { return 0, io.ErrUnexpectedEOF }

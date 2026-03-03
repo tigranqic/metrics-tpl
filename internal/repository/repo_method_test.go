@@ -3,6 +3,7 @@ package repository_test
 import (
 	"fmt"
 	"log"
+	"sort"
 
 	models "github.com/tigranqic/metrics-tpl/internal/model"
 	"github.com/tigranqic/metrics-tpl/internal/repository"
@@ -122,8 +123,16 @@ func Example_getAllMetrics() {
 
 	fmt.Printf("Total metrics stored: %d\n", len(metrics))
 
-	// Iterate through metrics
-	for id, metric := range metrics {
+	// Sort keys for consistent output
+	keys := make([]string, 0, len(metrics))
+	for k := range metrics {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Iterate through metrics in sorted order
+	for _, id := range keys {
+		metric := metrics[id]
 		switch metric.MType {
 		case "gauge":
 			fmt.Printf("%s (gauge): %.1f\n", id, *metric.Value)
